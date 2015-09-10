@@ -5,12 +5,12 @@ load("ch8.RData")
 
 require(stats4)
 
-par <- c(theta=-11.57, rho=0.045, tau1=0, tau2=0)
+pars <- list(theta=-11.57, rho=0.045, tau1=0, tau2=0)
 
 ySel <- t(MuSel)/PuSel
 fadeout <- ySel==0
 S <- t(SuSel)
-beta <- t(betaSel)
+beta <- t(exp(betaSel))
 
 relevant <- which(fadeout[,-546])
 obs <- fadeout[,-1][relevant]
@@ -33,18 +33,7 @@ likfn <- function (theta, rho, tau1, tau2) {
   -sum(log(ifelse(obs,prob,1-prob)))
 }
 
-with(as.list(par),likfn(theta,rho,tau1,tau2))
+with(pars,likfn(theta,rho,tau1,tau2))
+with(pars,system.time(likfn(theta,rho,tau1,tau2)))
 
-  lambdaSel<-exp(betaSel[-546,])*SuSel[-546,]*(exp(theta)*iotaSel[-546,])^alpha
-
-  mu<-lambdaSel[MuSel[-546,]==0]
-  obs<-ItSel[MuSel[-546,]==0]
-
-
-  #-sum(dnbinom(x=obs, size=exp(par[1])*iotaSel[-546,], mu=mu, log=T))
-  -sum(dpois(obs, mu, log=T))
-}
-
-date();likfn(par);date()
-test<-mle(likfn, start=list(theta=-11.57, rho=0.045, tau1=0, tau2=0))
-
+test <- mle(likfn, start=pars)
