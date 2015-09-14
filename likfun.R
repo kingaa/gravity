@@ -5,7 +5,7 @@ load("ch8.RData")
 
 require(stats4)
 
-pars <- list(theta=-11.57, rho=0.045, tau1=0, tau2=0)
+par <- list(theta=-15, rho=0, tau1=0, tau2=0)
 
 ySel <- t(MuSel)/PuSel
 fadeout <- ySel==0
@@ -29,11 +29,18 @@ likfn <- function (theta, rho, tau1, tau2) {
   iotaSel <- theta*(PuSel^tau1)*(pd%*%ySel)
   lambda <- beta*S*iotaSel^alpha
   prob <- exp(-lambda[relevant])
-  print(sum(!is.finite(prob)))
+  #print(sum(!is.finite(prob)))
   -sum(log(ifelse(obs,prob,1-prob)))
 }
 
-with(pars,likfn(theta,rho,tau1,tau2))
-with(pars,system.time(likfn(theta,rho,tau1,tau2)))
+system.time(do.call(likfn,par))
 
-test <- mle(likfn, start=pars)
+test <- mle(likfn,start=par,control=list(trace=4))
+
+exp(test@coef)
+
+summary(test)
+vcov(test)
+
+ctest <- confint(test)
+ptest <- profile(test)
