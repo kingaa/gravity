@@ -1,0 +1,58 @@
+## Competing destination model on E&W measles data using fade-out survival analysis
+
+The gravity model is
+
+$$\iota(i)=\theta N_i^{\tau_1} \sum_j\! (N_j)^{\tau_2} / d(i,j)^\rho\,\frac{I_j}{N_j}$$
+
+The competing destination model is
+$$\iota(i)=\theta N_i^{\tau_1} \sum_j\frac{N_j^{\tau_2}}{d(i,j)^\rho}\,\left(\sum_{k \ne i, j}\frac{N_k^{\tau_2}}{d(j,k)^\rho}\right)^\delta\,\frac{I_j}{N_j}$$
+note that the $\tau_2$ and $\rho$ coefficients are the same as in the gravity model, so the whole thing would be
+
+Let
+$$Q_{ij}=\begin{cases}\frac{N_j^{\tau_2}}{d(i,j)^\rho}, &i\ne j\\0, &i=j\end{cases}$$ and
+$$R_{ij}=\sum_{k \ne i, j}\frac{N_k^{\tau_2}}{d(j,k)^\rho}=\sum_{k\ne i,j}Q_{jk}=\sum_{k\ne i}Q_{jk}=\sum_{k}Q_{jk}-Q_{ji}.$$
+This implies
+$$R=(\mathbb{1}\,\mathbb{1}^T-I)\,Q^T.$$
+
+```{r}
+load("ch8.RData")
+
+require(stats4)
+
+par <- list(theta=-15, rho=0, tau1=0, tau2=0, delta=-0.1)
+
+ySel <- t(MuSel)/PuSel
+fadeout <- ySel==0
+S <- t(SuSel)
+beta <- t(exp(betaSel))
+
+trick <- 1-diag(952)
+
+relevant <- which(fadeout[,-546])
+obs <- fadeout[,-1][relevant]
+
+likfn <- function (theta, rho, tau1, tau2, delta) {
+  theta <- exp(theta)
+  rho <- exp(rho)
+  tau1 <- exp(tau1)
+  tau2 <- exp(tau2)
+  delta <- delta
+  Q <- PuSel^tau2*distSel^(-rho)
+  diag(Q) <- 0
+  Q <- Q*(tcrossprod(trick,Q)^delta)
+  # Q <- Q*(rowSums(Q)-diag(Q))
+  iotaSel <- theta*(PuSel^tau1)*(Q%*%ySel)
+  lambda <- beta*S*iotaSel^alpha
+  prob <- exp(-lambda[relevant])
+  # print(sum(!is.finite(prob)))
+  -sum(log(ifelse(obs,prob,1-prob)))
+}
+system.time(with(par,likfn(theta,rho,tau1,tau2,delta)))
+```
+
+```{r,eval=FALSE}
+test <- mle(likfn,start=par,control=list(trace=4))
+
+exp(test@coef)
+summary(test)
+```
