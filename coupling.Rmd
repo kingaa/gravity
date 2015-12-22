@@ -1,0 +1,562 @@
+---
+title: "Spatial coupling in measles"
+output:
+  html_document:
+    theme: default
+    toc: yes
+csl: ../ecology.csl
+---
+
+\newcommand\prob[1]{\mathbb{P}\left[{#1}\right]}
+\newcommand\expect[1]{\mathbb{E}\left[{#1}\right]}
+\newcommand\var[1]{\mathrm{Var}\left[{#1}\right]}
+\newcommand\dist[2]{\mathrm{#1}\left(#2\right)}
+\newcommand\dlta[1]{{\Delta}{#1}}
+\newcommand\lik{\mathscr{L}}
+\newcommand\loglik{\ell}
+
+Produced with **R** version `r getRversion()`.
+
+--------------------------
+
+```{r knitr-opts,include=FALSE,purl=FALSE,cache=FALSE}
+library(knitr)
+prefix <- "coupling"
+opts_chunk$set(
+  eval=TRUE,
+  progress=TRUE,
+  prompt=FALSE,tidy=FALSE,highlight=TRUE,
+  strip.white=TRUE,
+  warning=FALSE,
+  message=FALSE,
+  error=FALSE,
+  echo=TRUE,
+  cache=TRUE,
+  cache.extra=rand_seed,
+  results='markup',
+  fig.show='asis',
+  size='small',
+  fig.lp="fig:",
+  fig.path=paste0("figure/",prefix,"-"),
+  cache.path=paste0("cache/",prefix,"-"),
+  fig.pos="h!",
+  fig.align='center',
+  fig.height=4,fig.width=6.83,
+  dpi=300,
+  dev='png',
+  dev.args=list(bg='transparent')
+  )
+```
+```{r prelims,include=FALSE,cache=FALSE}
+options(
+  keep.source=TRUE,
+  stringsAsFactors=FALSE,
+  encoding="UTF-8"
+  )
+
+set.seed(594709947L)
+require(ggplot2)
+theme_set(theme_bw())
+require(grid)
+require(plyr)
+require(reshape2)
+require(magrittr)
+require(foreach)
+require(bbmle)
+require(pomp)
+
+# require(doMPI)
+# cl <- startMPIcluster()
+# registerDoMPI(cl)
+
+require(doMC)
+registerDoMC(30)
+```
+
+# Preparations
+
+## Preprocess the data.
+
+Retrieve the data from the database.
+
+```{r clean-data}
+bake(file="ew_measles_data.rds",{
+  require(aakmisc)
+  options(aakmisc.dbname="ewmeasles",aakmisc.remotehost="kinglab.eeb.lsa.umich.edu")
+  
+  startTunnel()
+  
+  getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
+
+  getQuery("select town,date,cases from measles where year>=1944 order by town,date") %>%
+    mutate(year=as.integer(format(date+3,"%Y"))) %>%
+    ddply(~town+year,mutate,week=seq_along(year),biweek=(week+1)%/%2) %>%
+    subset(week<=52,select=-c(date,week)) %>%
+    acast(town~year~biweek,value.var="cases",fun.aggregate=sum) %>%
+    melt(varnames=c("town","year","biweek"),value.name="cases") %>%
+    mutate(town=as.character(town)) %>%
+    arrange(town,year,biweek) %>%
+    join(demog,by=c("town","year")) %>%
+    mutate(births=births/26) -> measles
+  
+  stopTunnel()
+  measles
+}) -> dat
+```
+
+Measles data is weekly; dates given correspond to Sunday.
+Associate each week's data with the Weds. of that week.
+Discard any 53rd weeks (1947,1952,1958,1964).
+Aggregate by biweek (26 biweeks/yr).
+Join with demographic data.
+Scale birth rates to births/biweek.
+
+## Apply TSIR model to the individual towns.
+
+### Susceptible reconstruction.
+
+Smoothing spline regression of cumulative cases on cumulative births to estimate under-reporting and residuals.
+Correct for under-reporting: `I = cases/ur`.
+
+Regress cumulative cases on cumulative births to estimate under-reporting (ur) and susceptible depletion (`z`) `I` is estimated as `cases/ur`.
+
+```{r under-reporting}
+estUR <- function (dat, df = 2.5) {
+  cumbirths <- cumsum(dat$births)
+  cumcases <- cumsum(dat$cases)
+  fit <- smooth.spline(cumbirths,cumcases,df=df)
+  mutate(dat,
+         ur=predict(fit,x=cumbirths,deriv=1)$y,
+         I=cases/ur)
+}
+
+dat %<>% ddply(~town,estUR,.parallel=TRUE)
+```
+
+Now reconstruct the susceptibles (via the residuals `z`).
+
+```{r susceptible-reconstruction}
+suscRecon <- function (dat, df = 2.5) {
+  cumbirths <- cumsum(dat$births)
+  cuminc <- cumsum(dat$I)
+  fit <- smooth.spline(cumbirths,cuminc,df=df)
+  mutate(dat,z=-residuals(fit))
+}
+
+dat %<>% ddply(~town,suscRecon,.parallel=TRUE)
+```
+
+*Does the preceding scale the z variable appropriately?*
+*I.e., does it take under-reporting into account?*
+
+### Fit TSIR
+
+First, set up the data matrix for the regression.
+This involves lagging the I and z variables.
+Population size is assumed constant at its median value.
+
+```{r make-data-matrix}
+dat %<>%
+  ddply(~town,mutate,
+        Ilag=c(NA,head(I,-1)),
+        zlag=c(NA,head(z,-1)),
+        Ps=median(pop),
+        seas=factor(biweek,levels=1:26)) %>%
+  ddply(~town,tail,-1)
+```
+
+We'll start by estimating the mean susceptible fraction, assuming a single global value for this parameter.
+Some towns have very high changes in susceptible fraction; exclude these.
+
+```{r exclude-weird-towns}
+dat %>%
+  ddply(~town,summarize,
+        maxfrac=max(-z/Ps)) %>%
+  subset(maxfrac>0.03) %>%
+  extract2("town") -> excludes
+
+print(length(excludes))
+```
+
+Now profile on the fraction, $\sigma$, of susceptibles in the population.
+This assumes a single, global value of $\sigma$.
+**NOTE: the $\beta$ are here scaled by population size.**
+
+```{r sigma-profile}
+dat %>% subset(!(town%in%excludes)) -> dat1
+
+sigma1dev <- function (dat, sigma) {
+  slag <- with(dat,sigma*Ps+zlag)
+  fit <- glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(-log(Ps)+log(slag)),
+             data=dat,subset=Ilag>0&I>0)
+  fit$deviance
+}
+
+foreach (sigma=seq(0.03,0.25,length=100),
+         .combine=rbind,.inorder=FALSE) %do%
+         {
+           dat1 %>% 
+             daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>% 
+             sum() -> dev
+           data.frame(sigma=sigma,dev=dev)
+         } %>%
+  ggplot(aes(x=sigma,y=dev))+geom_line()
+
+fit <- optim(par=0.037,lower=0.03,upper=0.10,
+             method="Brent",hessian=TRUE,
+             fn=function (sigma) {
+               dat1 %>% 
+                 daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>% 
+                 sum()
+             })
+sigmaBar <- fit$par
+
+dat %<>% mutate(Slag=sigmaBar*Ps+zlag)
+```
+
+Our global sigma estimate is $\sigma=`r signif(sigmaBar,3)`$.
+Now, we assume this value of $\sigma$ and fit TSIR to each of the towns individually using linear regression.
+
+```{r }
+coefnames <- c(sprintf("seas%d",1:26),"log(Ilag)","I(1/Ilag)")
+newcoefnames <- c(sprintf("log.beta%02d",1:26),"alpha","m.alpha")
+
+tsirfit <- function (dat) {
+  glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(-log(Ps)+log(Slag)),
+      data=dat,subset=Ilag>0&I>0) %>% summary() %>% 
+    extract2("coefficients") -> fit
+  fit[,"Estimate"] %>% extract(coefnames) %>% as.list() %>% as.data.frame() %>%
+    set_names(newcoefnames) -> coefs
+  fit[,"Std. Error"] %>% extract(coefnames) %>% as.list() %>% as.data.frame() %>%
+    set_names(paste(newcoefnames,"se",sep=".")) -> se
+  cbind(coefs,se,sigma=sigmaBar,
+        town=unique(dat$town),Ps=unique(dat$Ps))
+}
+
+dat %>% ddply(~town,tsirfit,.parallel=TRUE) %>% 
+  melt(id=c("town","Ps")) %>% 
+  mutate(se=ifelse(grepl("\\.se$",variable),"se","est"),
+         variable=sub("\\.se$","",variable)) %>%
+  dcast(town+Ps+variable~se) -> tsirs
+
+dat %>% ddply(~town,summarize,Ps=unique(Ps)) -> tsircoef
+
+tsirs %>% 
+  na.omit() %>%
+  ddply(~variable, function (d) {
+    fit <- lm(est~log(Ps),data=d,weights=1/se^2) 
+    data.frame(town=tsircoef$town,value=predict(fit,newdata=tsircoef))
+    },.parallel=TRUE) %>% dcast(town~variable) -> tsircoef
+
+dat %<>% join(tsircoef,by="town")
+
+dat %<>% mutate(ylag=Ilag/Ps)
+```
+
+Now let's compute the distances between the cities.
+```{r distances}
+bake(file="distances.rds",{
+  require(aakmisc)
+  options(aakmisc.dbname="ewmeasles",aakmisc.remotehost="kinglab.eeb.lsa.umich.edu")
+  
+  startTunnel()
+  getQuery("select * from coords") -> coords
+  stopTunnel()
+  rownames(coords) <- coords$town
+  
+  require(ncf)
+   
+  ## compute distance matrix
+  expand.grid(i=coords$town,j=coords$town) %>%
+    ddply(~i,mutate,
+          dist=mapply(gcdist,x1=coords[i,"long"],y1=coords[i,"lat"],
+                      x2=coords[j,"long"],y2=coords[j,"lat"]),
+          .parallel=TRUE) %>% 
+    # mutate(dist=mapply(dist,i,j)) %>% 
+    acast(i~j,value.var="dist")
+}) -> distances
+```
+
+
+Shat is fitted to each individually
+Sbar is fitted globally (with some towns excluded)
+
+
+# Coupling the cities.
+
+Let $X_{i}(t)$ be the observation at time $t$ in city $i$.
+We assume that
+$X_{i}(t+1) \sim \dist{Bernoulli}{e^{-\lambda_i(t)}}$.
+
+When $I_i(t)=0$, we have that
+$$\lambda_i(t) = \beta_i(t)\,S_i(t)\,\iota_i(t)^\alpha.$$
+In the above, $\beta$ is constructed by fitting the TSIR model to each city independently and the susceptible pool, $S$, is reconstructed using TSIR methods.
+The quantity $\iota$ is the import rate, which we estimate using a variety of different models.
+
+
+# The gravity model
+
+The gravity model is
+$$\iota_i=\theta N_i^{\tau_1} \sum_{j\ne i}\! N_j^{\tau_2} d_{ij}^{-\rho}\,\frac{I_j}{N_j}.$$
+Let
+$$Q_{ij}=\begin{cases}N_i^{\tau_2}\,d_{ij}^{-\rho}, &i\ne j\\0, &i=j\end{cases}$$ and
+$$y_{i}=\frac{I_i}{N_i}.$$
+
+Expressed compactly, the gravity model is
+$$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y.$$
+
+
+The following computes $y$, $S$, $\beta$, and the matrix of reciprocal distances.
+It also picks out the relevant observations.
+These are the ones for which the preceding week saw zero cases.
+**Do we need to worry about under-reporting?**
+```{r gravity-pre}
+ySel <- t(MuSel)/PuSel
+S <- t(SuSel)
+beta <- t(exp(betaSel))
+dd <- 1/distSel
+diag(dd) <- 0
+
+fadeout <- ySel==0
+relevant <- which(fadeout[,-ncol(fadeout)])
+obs <- fadeout[,-1][relevant]
+```
+
+The negative log likelihood function for the gravity model is:
+```{r gravity-like,eval=FALSE}
+likfn <- function (theta, rho, a, b) {
+  theta <- exp(theta)
+  rho <- exp(rho)
+  tau1 <- a+b
+  tau2 <- a-b
+  Q <- (PuSel^tau2)*(dd^rho)
+  iotaSel <- theta*(PuSel^tau1)*crossprod(Q,ySel)
+  lambda <- beta*S*iotaSel^alpha
+  prob <- exp(-lambda[relevant])
+  -sum(log(ifelse(obs,prob,1-prob)))
+}
+```
+
+Now we test the likelihood function by attempting to maximize it.
+```{r gravity-test,eval=FALSE}
+par <- c(theta=-3, rho=0, a=0.5, b=0.5)
+with(as.list(par),likfn(theta,rho,a,b))
+
+tic <- Sys.time()
+test <- mle2(likfn,
+             method="Nelder-Mead",
+             start=as.list(par),
+             control=list(trace=4,maxit=1000))
+test <- mle2(likfn,
+             method="BFGS",
+             start=as.list(as.list(coef(test))),
+             control=list(trace=4,maxit=1000))
+toc <- Sys.time()
+toc-tic
+
+summary(test)
+
+with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),tau1=a+b,tau2=a-b))
+```
+
+```{r gravity-test-2,eval=FALSE}
+vcov(test)
+cov2cor(vcov(test))
+```
+
+```{r gravity-test-3,eval=FALSE}
+ctest<-confint(test); ctest
+ptest<-profile(test)
+```
+
+```{r gravity-profile-2D}
+likfn <- function (theta, rho, tau1, tau2) {
+  theta <- exp(theta)
+  rho <- exp(rho)
+  Q <- (PuSel^tau2)*(dd^rho)
+  iotaSel <- theta*(PuSel^tau1)*crossprod(Q,ySel)
+  lambda <- beta*S*iotaSel^alpha
+  prob <- exp(-lambda[relevant])
+  -sum(log(ifelse(obs,prob,1-prob)))
+}
+
+bake(file="results.rds",{
+  grd <- expand.grid(
+    tau1=seq(0.1, 2, by=.05), 
+    tau2=seq(-1, 1, by=.05),
+    rho=log(1.0),
+    theta=log(0.05)
+  )
+  
+  tic <- Sys.time()
+  
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .options.mpi=list(seed=95886868),
+          .packages="bbmle"
+  ) %do% try(
+    {
+      mle2(likfn,
+           method="Nelder-Mead",
+           start=as.list(start[c("rho","theta")]),
+           fixed=as.list(start[c("tau1","tau2")]), 
+           control=list(trace=0,maxit=1000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
+    }
+  ) -> results
+  
+  toc <- Sys.time()
+  print(toc-tic)  ## 9 hr on 100 processors
+  
+  results
+}) -> results
+
+results %>%
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
+
+results %<>%
+  extract(!sapply(results,inherits,"try-error")) %>%
+  ldply() 
+
+results %>%
+  ggplot(aes(x=tau1,y=tau2,z=loglik,fill=loglik))+
+  geom_tile(color=NA)+geom_contour(bins=100)+
+  labs(x=expression(tau[1]),y=expression(tau[2]))
+```
+
+
+```{r eval=FALSE}
+##########
+#source('t1t2t2015.dump')
+
+require(locfit)
+
+grd<-log(expand.grid(tau1=seq(0.1, 2, by=.05), tau2=seq(0.1, 2, by=.05)))
+
+data=na.omit(data.frame(llik=t1t2$llik, theta=exp(t1t2$coef[,1]), rho=exp(t1t2$coef[,2]), tau1=exp(grd[,1]), tau2=exp(grd[,2])))
+
+prof=locfit(llik~lp(tau1, tau2, nn=0.1, h=0.1), data=data)
+plot(prof)
+
+points(.75, .75)
+
+which.max(data$llik)
+
+sub=data[data$tau1<1&data$tau2<1,]
+
+prof=locfit(llik~lp(tau1, tau2, nn=0.1, h=0.1), data=sub)
+plot(prof)
+points(sub[which.max(sub$llik),4],sub[which.max(sub$llik),5])
+
+
+#######prof code below#######
+require(bbmle)
+
+par <- c(theta=-15, rho=0)
+
+ySel <- t(MuSel)/PuSel
+fadeout <- ySel==0
+S <- t(SuSel)
+beta <- t(exp(betaSel))
+
+relevant <- which(fadeout[,-546])
+obs <- fadeout[,-1][relevant]
+
+likfn <- function (theta, rho, tau1, tau2) {
+    theta <- exp(theta)
+    rho <- exp(rho)
+    tau1 <- exp(tau1)
+    tau2 <- exp(tau2)
+    pd <- PuSel^tau2*distSel^(-rho)
+    diag(pd) <- 0
+    iotaSel <- theta*(PuSel^tau1)*(pd%*%ySel)
+    lambda <- beta*S*iotaSel^alpha
+    prob <- exp(-lambda[relevant])
+    #print(sum(!is.finite(prob)))
+    -sum(log(ifelse(obs,prob,1-prob)))
+}
+
+
+
+grd<-log(expand.grid(tau1=seq(0.1, 2, by=.05), tau2=seq(0.1, 2, by=.05)))
+
+#t1t2<-list(llik=rep(NA, 1521), coef=matrix(NA, ncol=2, nrow=1521))
+
+for(j in 601:1521){
+    cat(date(), '\n')
+    test<-mle2(likfn, start=list(theta=-15, rho=0), fixed=list(tau1=grd[j,1], tau2=grd[j,2]), control=list(trace=4), skip.hessian=T)
+    cat(j, '\n')
+    t1t2$llik[j]<-logLik(test)[1]
+    t1t2$coef[j,]<-coef(test)[1:2]
+    dump('t1t2', 't1t2t2015.dump')
+    cat(date(), '\n')
+}
+```
+
+
+
+# Competing destination model on E&W measles data using fade-out survival analysis
+
+The competing destination model is
+$$\iota(i)=\theta N_i^{\tau_1} \sum_j\frac{N_j^{\tau_2}}{d(i,j)^\rho}\,\left(\sum_{k \ne i, j}\frac{N_k^{\tau_2}}{d(j,k)^\rho}\right)^\delta\,\frac{I_j}{N_j}$$
+note that the $\tau_2$ and $\rho$ coefficients are the same as in the gravity model, so the whole thing would be
+
+Let
+$$Q_{ij}=\begin{cases}\frac{N_j^{\tau_2}}{d(i,j)^\rho}, &i\ne j\\0, &i=j\end{cases}$$ and
+$$R_{ij}=\sum_{k \ne i, j}\frac{N_k^{\tau_2}}{d(j,k)^\rho}=\sum_{k\ne i,j}Q_{jk}=\sum_{k\ne i}Q_{jk}=\sum_{k}Q_{jk}-Q_{ji}.$$
+This implies
+$$R=(\mathbb{1}\,\mathbb{1}^T-I)\,Q^T.$$
+
+```{r eval=FALSE}
+load("ch8.RData")
+
+require(stats4)
+
+par <- list(theta=-15, rho=0, tau1=0, tau2=0, delta=-0.1)
+
+ySel <- t(MuSel)/PuSel
+fadeout <- ySel==0
+S <- t(SuSel)
+beta <- t(exp(betaSel))
+
+trick <- 1-diag(952)
+
+relevant <- which(fadeout[,-546])
+obs <- fadeout[,-1][relevant]
+
+likfn <- function (theta, rho, tau1, tau2, delta) {
+  theta <- exp(theta)
+  rho <- exp(rho)
+  tau1 <- exp(tau1)
+  tau2 <- exp(tau2)
+  delta <- delta
+  Q <- PuSel^tau2*distSel^(-rho)
+  diag(Q) <- 0
+  Q <- Q*(tcrossprod(trick,Q)^delta)
+  # Q <- Q*(rowSums(Q)-diag(Q))
+  iotaSel <- theta*(PuSel^tau1)*(Q%*%ySel)
+  lambda <- beta*S*iotaSel^alpha
+  prob <- exp(-lambda[relevant])
+  # print(sum(!is.finite(prob)))
+  -sum(log(ifelse(obs,prob,1-prob)))
+}
+system.time(with(par,likfn(theta,rho,tau1,tau2,delta)))
+```
+
+```{r,eval=FALSE}
+test <- mle(likfn,start=par,control=list(trace=4))
+
+exp(test@coef)
+summary(test)
+```
+
+```{r stop-mpi,include=FALSE}
+closeCluster(cl)
+try(detach("package:doMPI",unload=TRUE),silent=TRUE)
+if (exists("mpi.exit")) mpi.exit()
+try(detach("package:Rmpi",unload=TRUE),silent=TRUE)
+```
