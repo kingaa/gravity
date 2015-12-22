@@ -43,7 +43,7 @@ startTunnel()
 
 getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
 
-##' Measles data is weekly.
+##' Measles data is weekly; dates given correspond to Sunday.
 ##' Associate each week's data with the Weds. of that week.
 ##' Discard any 53rd weeks (1947,1952,1958,1964)
 ##' Aggregate by biweek (26 biweeks/yr)
@@ -56,7 +56,7 @@ getQuery("select town,date,cases from measles where year>=1944 order by town,dat
   acast(town~year~biweek,value.var="cases",fun.aggregate=sum) %>%
   melt(varnames=c("town","year","biweek"),value.name="cases") %>%
   mutate(town=as.character(town)) %>%
-  arrange(town,year,biweek) %>% 
+  arrange(town,year,biweek) %>%
   join(demog,by=c("town","year")) %>%
   mutate(births=births/26) -> measles
 
