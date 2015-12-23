@@ -411,7 +411,7 @@ bake(file="gravity.rds",{
   ) -> results
   
   toc <- Sys.time()
-  print(toc-tic)  ## 9 hr on 100 processors
+  print(toc-tic)  ## 7.8 hr on 100 processors
   
   results
 }) -> results
