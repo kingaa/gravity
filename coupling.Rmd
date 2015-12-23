@@ -70,7 +70,7 @@ require(pomp)
 # registerDoMPI(cl)
 
 require(doMC)
-registerDoMC(30)
+registerDoMC()
 ```
 
 # Preparations
@@ -381,7 +381,7 @@ vcov(test)
 cov2cor(vcov(test))
 ```
 
-```{r gravity-profile-2D,eval=FALSE}
+```{r gravity-profile-2D}
 bake(file="gravity.rds",{
   
   grd <- expand.grid(
