@@ -342,7 +342,7 @@ dd <- dd/ddscal
 alpha <- mean(dat$alpha)
 
 fadeout <- which(ylag==0&slag>=0)
-obs <- obs[fadeout]>0
+obs <- obs[fadeout]
 betaS <- beta[fadeout]*slag[fadeout]
 ```
 
@@ -353,8 +353,8 @@ likfn <- function (theta, rho, tau1, tau2) {
   rho <- exp(rho)
   Q <- (N^tau2)*(dd^rho)
   iota <- theta*(N^tau1)*crossprod(Q,ylag)
-  prob <- exp(-betaS*iota[fadeout]^alpha)
-  -sum(log(ifelse(obs,1-prob,prob)))
+  lambda <- betaS*iota[fadeout]^alpha
+  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
 }
 ```
 
@@ -426,9 +426,11 @@ results %<>%
   ldply() 
 
 results %>%
-  ggplot(aes(x=tau1,y=tau2,z=loglik,fill=loglik))+
-  geom_tile(color=NA)+geom_contour(bins=100)+
-  labs(x=expression(tau[1]),y=expression(tau[2]))
+  ggplot(aes(x=tau1,y=tau2,z=loglik,
+	     fill=ifelse(loglik>max(loglik)-2000,
+				loglik,NA)))+
+  geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+  labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
 # Competing destination model on E&W measles data using fade-out survival analysis
