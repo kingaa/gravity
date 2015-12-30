@@ -341,9 +341,9 @@ dd <- dd/ddscal
 
 alpha <- mean(dat$alpha)
 
-fadeout <- which(ylag==0&slag>=0)
-obs <- obs[fadeout]
-betaS <- beta[fadeout]*slag[fadeout]
+relevant <- which(ylag==0&slag>=0)
+obs <- obs[relevant]
+betaS <- beta[relevant]*slag[relevant]
 ```
 
 The negative log likelihood function for the gravity model is:
@@ -353,7 +353,7 @@ likfn <- function (theta, rho, tau1, tau2) {
   rho <- exp(rho)
   Q <- (N^tau2)*(dd^rho)
   iota <- theta*(N^tau1)*crossprod(Q,ylag)
-  lambda <- betaS*iota[fadeout]^alpha
+  lambda <- betaS*iota[relevant]^alpha
   -sum(dpois(x=obs,lambda=lambda,log=TRUE))
 }
 ```
@@ -385,7 +385,7 @@ cov2cor(vcov(test))
 bake(file="gravity.rds",{
   
   grd <- expand.grid(
-    tau1=seq(0.1, 2, by=.05), 
+    tau1=seq(0.1, 1.4, by=.05), 
     tau2=seq(-1, 1, by=.05),
     rho=log(1.0),
     theta=log(0.0001)
@@ -396,7 +396,7 @@ bake(file="gravity.rds",{
   foreach(start=iter(grd,"row"),
           .errorhandling="pass",
           .inorder=FALSE,
-          .options.mpi=list(seed=95886868,chunkSize=4),
+          .options.mpi=list(seed=95886868,chunkSize=1),
           .packages="bbmle"
   ) %do% try(
     {
@@ -411,7 +411,7 @@ bake(file="gravity.rds",{
   ) -> results
   
   toc <- Sys.time()
-  print(toc-tic)  ## 7.8 hr on 100 processors
+  print(toc-tic)
   
   results
 }) -> results
@@ -436,14 +436,134 @@ results %>%
 # Competing destination model on E&W measles data using fade-out survival analysis
 
 The competing destination model is
-$$\iota(i)=\theta N_i^{\tau_1} \sum_j\frac{N_j^{\tau_2}}{d(i,j)^\rho}\,\left(\sum_{k \ne i, j}\frac{N_k^{\tau_2}}{d(j,k)^\rho}\right)^\delta\,\frac{I_j}{N_j}$$
+$$\iota_i=\theta N_i^{\tau_1} \sum_j\frac{N_j^{\tau_2}}{d_{ij}^\rho}\,\left(\sum_{k \ne i, j}\frac{N_k^{\tau_2}}{d_{jk}^\rho}\right)^\delta\,\frac{I_j}{N_j}$$
 note that the $\tau_2$ and $\rho$ coefficients are the same as in the gravity model, so the whole thing would be
 
 Let
-$$Q_{ij}=\begin{cases}\frac{N_j^{\tau_2}}{d(i,j)^\rho}, &i\ne j\\0, &i=j\end{cases}$$ and
-$$R_{ij}=\sum_{k \ne i, j}\frac{N_k^{\tau_2}}{d(j,k)^\rho}=\sum_{k\ne i,j}Q_{jk}=\sum_{k\ne i}Q_{jk}=\sum_{k}Q_{jk}-Q_{ji}.$$
+$$Q_{ij}=\begin{cases}{N_i^{\tau_2}}{d_{ij}^{-\rho}}, &i\ne j\\0, &i=j\end{cases}$$ and
+$$R_{ji}=\sum_{k \ne i, j}{N_k^{\tau_2}}{d_{jk}^{-\rho}}=\sum_{k\ne i,j}Q_{kj}=\sum_{k\ne i}Q_{kj}=\sum_{k}Q_{kj}-Q_{ij}.$$
 This implies
-$$R=(\mathbb{1}\,\mathbb{1}^T-I)\,Q^T.$$
+$$R^T=(\mathbb{1}\,\mathbb{1}^T-I)\,Q \qquad \Longleftrightarrow \qquad R=Q^T\,(\mathbb{1}\,\mathbb{1}^T-I)$$
+and
+$$\iota_i=\theta\,N_i^{\tau_1}\,\sum_j Q_{ji}\,R_{ji}^\delta\,y_{j}.$$
+
+```{r compdest-pre}
+dat %>% acast(town~year+biweek,value.var="ylag") -> ylag
+dat %>% acast(town~year+biweek,value.var="Slag") -> slag
+dat %>% acast(town~year+biweek,value.var="log.beta") %>% exp() -> beta
+dat %>% acast(town~year+biweek,value.var="cases") -> obs
+dat %>% daply(~town,function(x)unique(x$Ps)) -> N
+iii <- 1-diag(length(N))
+
+dd <- 1/distances
+diag(dd) <- 0
+
+stopifnot(identical(rownames(ylag),rownames(slag)))
+stopifnot(identical(rownames(ylag),rownames(beta)))
+stopifnot(identical(rownames(ylag),rownames(obs)))
+stopifnot(identical(rownames(ylag),names(N)))
+stopifnot(identical(rownames(ylag),rownames(dd)))
+stopifnot(identical(rownames(ylag),colnames(dd)))
+      
+ddscal <- exp(mean(log(dd[lower.tri(dd)])))
+dd <- dd/ddscal
+
+alpha <- mean(dat$alpha)
+
+relevant <- which(ylag==0&slag>=0)
+obs <- obs[relevant]
+betaS <- beta[relevant]*slag[relevant]
+```
+
+The negative log likelihood function for the competing destinations model is:
+```{r compdest-like}
+likfn <- function (theta, rho, tau1, tau2, delta) {
+  theta <- exp(theta)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  R <- crossprod(Q,iii)^delta
+  iota <- theta*(N^tau1)*crossprod(Q*R,ylag)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+}
+```
+
+Now we test the likelihood function by attempting to maximize it.
+```{r compdest-test,purl=FALSE}
+par <- list(theta=0, rho=0, tau1=0.5, tau2=0.5, delta=0)
+with(par,likfn(theta,rho,tau1,tau2,delta))
+
+tic <- Sys.time()
+test <- mle2(likfn,
+             method="Nelder-Mead",
+             start=par,
+             control=list(trace=0,maxit=4000))
+toc <- Sys.time()
+toc-tic
+
+summary(test)
+
+with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),delta=delta,tau1=tau1,tau2=tau2))
+```
+
+```{r compdest-test-2,purl=FALSE}
+vcov(test)
+cov2cor(vcov(test))
+```
+
+```{r compdest-profile-2D}
+bake(file="compdest.rds",{
+  
+  grd <- expand.grid(
+    tau1=seq(0.1, 1.4, by=.05), 
+    tau2=seq(-1, 1, by=.05),
+    rho=log(1.0),
+    theta=log(1),
+    delta=0
+  )
+  
+  tic <- Sys.time()
+  
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .options.mpi=list(seed=95886868,chunkSize=1),
+          .packages="bbmle"
+  ) %do% try(
+    {
+      mle2(likfn,
+           method="Nelder-Mead",
+           start=as.list(start[c("rho","theta","delta")]),
+           fixed=as.list(start[c("tau1","tau2")]), 
+           control=list(trace=0,maxit=4000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
+    }
+  ) -> results
+  
+  toc <- Sys.time()
+  print(toc-tic)
+  
+  results
+}) -> results
+
+results %>%
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
+
+results %<>%
+  extract(!sapply(results,inherits,"try-error")) %>%
+  ldply() 
+
+results %>%
+  ggplot(aes(x=tau1,y=tau2,z=loglik,
+	     fill=ifelse(loglik>max(loglik)-2000,
+				loglik,NA)))+
+  geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+  labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+```
+
 
 ```{r stop-mpi,include=FALSE}
 if (exists("cl")) closeCluster(cl)
