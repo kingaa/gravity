@@ -564,7 +564,7 @@ results %<>%
 
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
-	     fill=ifelse(loglik>max(loglik)-2000,
+             fill=ifelse(loglik>max(loglik)-2000,
                          loglik,NA)))+
     geom_tile(color=NA)+geom_contour(bins=100,color='white')+
     labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
