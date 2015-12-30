@@ -363,13 +363,16 @@ Now we test the likelihood function by attempting to maximize it.
 par <- list(theta=-8, rho=0, tau1=0.5, tau2=0.5)
 with(par,likfn(theta,rho,tau1,tau2))
 
-tic <- Sys.time()
-test <- mle2(likfn,
-             method="Nelder-Mead",
-             start=par,
-             control=list(trace=0,maxit=1000))
-toc <- Sys.time()
-toc-tic
+bake(file="gravity-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfn,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=1000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
 
 summary(test)
 
@@ -493,13 +496,16 @@ Now we test the likelihood function by attempting to maximize it.
 par <- list(theta=0, rho=0, tau1=0.5, tau2=0.5, delta=0)
 with(par,likfn(theta,rho,tau1,tau2,delta))
 
-tic <- Sys.time()
-test <- mle2(likfn,
-             method="Nelder-Mead",
-             start=par,
-             control=list(trace=0,maxit=4000))
-toc <- Sys.time()
-toc-tic
+bake(file="compdest-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfn,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=4000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
 
 summary(test)
 
@@ -559,11 +565,16 @@ results %<>%
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
 	     fill=ifelse(loglik>max(loglik)-2000,
-				loglik,NA)))+
-  geom_tile(color=NA)+geom_contour(bins=100,color='white')+
-  labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+                         loglik,NA)))+
+    geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+    labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
+```{r compdest-pairsplot,fig.height=6.83}
+pairs(~loglik+theta+rho+delta+tau1+tau2,
+      data=results,
+      subset=loglik>max(loglik)-10000,cex=0.5)
+```
 
 ```{r stop-mpi,include=FALSE}
 if (exists("cl")) closeCluster(cl)
