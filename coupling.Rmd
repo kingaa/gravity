@@ -464,31 +464,7 @@ and
 $$\iota_i=\theta\,N_i^{\tau_1}\,\sum_j Q_{ji}\,R_{ji}^\delta\,y_{j}.$$
 
 ```{r compdest-pre}
-dat %>% acast(town~year+biweek,value.var="ylag") -> ylag
-dat %>% acast(town~year+biweek,value.var="Slag") -> slag
-dat %>% acast(town~year+biweek,value.var="log.beta") %>% exp() -> beta
-dat %>% acast(town~year+biweek,value.var="cases") -> obs
-dat %>% daply(~town,function(x)unique(x$Ps)) -> N
 iii <- 1-diag(length(N))
-
-dd <- 1/distances
-diag(dd) <- 0
-
-stopifnot(identical(rownames(ylag),rownames(slag)))
-stopifnot(identical(rownames(ylag),rownames(beta)))
-stopifnot(identical(rownames(ylag),rownames(obs)))
-stopifnot(identical(rownames(ylag),names(N)))
-stopifnot(identical(rownames(ylag),rownames(dd)))
-stopifnot(identical(rownames(ylag),colnames(dd)))
-      
-ddscal <- exp(mean(log(dd[lower.tri(dd)])))
-dd <- dd/ddscal
-
-alpha <- mean(dat$alpha)
-
-relevant <- which(ylag==0&slag>=0)
-obs <- obs[relevant]
-betaS <- beta[relevant]*slag[relevant]
 ```
 
 The negative log likelihood function for the competing destinations model is:
