@@ -104,12 +104,13 @@ bake(file="ew_measles_data.rds",{
 }) -> dat
 ```
 
-Measles data is weekly; dates given correspond to Sunday.
-Associate each week's data with the Weds. of that week.
-Discard any 53rd weeks (1947,1952,1958,1964).
-Aggregate by biweek (26 biweeks/yr).
-Join with demographic data.
-Scale birth rates to births/biweek.
+In the above:
+1. Measles data is weekly; dates given correspond to Sunday.
+1. Associate each week's data with the Weds. of that week.
+1. Discard any 53rd weeks (1947,1952,1958,1964).
+1. Aggregate by biweek (26 biweeks/yr).
+1. Join with demographic data.
+1. Scale birth rates to births/biweek.
 
 ## Apply TSIR model to the individual towns.
 
@@ -262,7 +263,7 @@ bake(file="tsir-fits.rds",{
 ```
 
 Just for interest, let's plot $R_0$ as a function of city size.
-```{r R0-plot}
+```{r R0-plot,purl=FALSE}
 require(scales)
 dat %>% ddply(~town,summarize,N=mean(Ps),
               beta=exp(mean(log.beta)),R0=beta*N) %>%
@@ -308,7 +309,7 @@ Sbar is fitted globally (with some towns excluded)
 
 Let $X_{i}(t)$ be the observation at time $t$ in city $i$.
 We assume that
-$X_{i}(t+1) \sim \dist{Bernoulli}{e^{-\lambda_i(t)}}$.
+$X_{i}(t+1) \sim \dist{Poisson}{\lambda_i(t)}$.
 
 When $I_i(t)=0$, we have that
 $$\lambda_i(t) = \beta_i(t)\,S_i(t)\,\iota_i(t)^\alpha.$$
@@ -331,7 +332,6 @@ $$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y.$$
 The following computes $y$, $S$, $\beta$, and the matrix of reciprocal distances.
 It also picks out the relevant observations.
 These are the ones for which the preceding week saw zero cases.
-**Do we need to worry about under-reporting?**
 ```{r gravity-pre}
 dat %>% acast(town~year+biweek,value.var="ylag") -> ylag
 dat %>% acast(town~year+biweek,value.var="Slag") -> slag
@@ -361,7 +361,7 @@ betaS <- beta[relevant]*slag[relevant]
 
 The negative log likelihood function for the gravity model is:
 ```{r gravity-like}
-likfn <- function (theta, rho, tau1, tau2) {
+likfnGravity <- function (theta, rho, tau1, tau2) {
   theta <- exp(theta)
   rho <- exp(rho)
   Q <- (N^tau2)*(dd^rho)
@@ -374,11 +374,11 @@ likfn <- function (theta, rho, tau1, tau2) {
 Now we test the likelihood function by attempting to maximize it.
 ```{r gravity-test,purl=FALSE}
 par <- list(theta=-8, rho=0, tau1=0.5, tau2=0.5)
-with(par,likfn(theta,rho,tau1,tau2))
+with(par,likfnGravity(theta,rho,tau1,tau2))
 
 bake(file="gravity-test.rds",{
     tic <- Sys.time()
-    test <- mle2(likfn,
+    test <- mle2(likfnGravity,
                  method="Nelder-Mead",
                  start=par,
                  control=list(trace=0,maxit=1000))
@@ -390,9 +390,7 @@ bake(file="gravity-test.rds",{
 summary(test)
 
 with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),tau1=tau1,tau2=tau2))
-```
 
-```{r gravity-test-2,purl=FALSE}
 vcov(test)
 cov2cor(vcov(test))
 ```
@@ -416,7 +414,7 @@ bake(file="gravity.rds",{
           .packages="bbmle"
   ) %do% try(
     {
-      mle2(likfn,
+      mle2(likfnGravity,
            method="Nelder-Mead",
            start=as.list(start[c("rho","theta")]),
            fixed=as.list(start[c("tau1","tau2")]), 
@@ -439,14 +437,13 @@ results %>%
 
 results %<>%
   extract(!sapply(results,inherits,"try-error")) %>%
-  ldply() 
+    ldply() 
 
 results %>%
-  ggplot(aes(x=tau1,y=tau2,z=loglik,
-	     fill=ifelse(loglik>max(loglik)-2000,
-				loglik,NA)))+
-  geom_tile(color=NA)+geom_contour(bins=100,color='white')+
-  labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+    ggplot(aes(x=tau1,y=tau2,z=loglik,
+               fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
+    geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+    labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
 # Competing destination model on E&W measles data using fade-out survival analysis
@@ -469,7 +466,7 @@ iii <- 1-diag(length(N))
 
 The negative log likelihood function for the competing destinations model is:
 ```{r compdest-like}
-likfn <- function (theta, rho, tau1, tau2, delta) {
+likfnCompDest <- function (theta, rho, tau1, tau2, delta) {
   theta <- exp(theta)
   rho <- exp(rho)
   Q <- (N^tau2)*(dd^rho)
@@ -483,11 +480,11 @@ likfn <- function (theta, rho, tau1, tau2, delta) {
 Now we test the likelihood function by attempting to maximize it.
 ```{r compdest-test,purl=FALSE}
 par <- list(theta=0, rho=0, tau1=0.5, tau2=0.5, delta=0)
-with(par,likfn(theta,rho,tau1,tau2,delta))
+with(par,likfnCompDest(theta,rho,tau1,tau2,delta))
 
 bake(file="compdest-test.rds",{
     tic <- Sys.time()
-    test <- mle2(likfn,
+    test <- mle2(likfnCompDest,
                  method="Nelder-Mead",
                  start=par,
                  control=list(trace=0,maxit=4000))
@@ -499,9 +496,7 @@ bake(file="compdest-test.rds",{
 summary(test)
 
 with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),delta=delta,tau1=tau1,tau2=tau2))
-```
 
-```{r compdest-test-2,purl=FALSE}
 vcov(test)
 cov2cor(vcov(test))
 ```
@@ -526,7 +521,7 @@ bake(file="compdest.rds",{
           .packages="bbmle"
   ) %do% try(
     {
-      mle2(likfn,
+      mle2(likfnCompDest,
            method="Nelder-Mead",
            start=as.list(start[c("rho","theta","delta")]),
            fixed=as.list(start[c("tau1","tau2")]), 
