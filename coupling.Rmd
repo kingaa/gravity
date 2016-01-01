@@ -65,12 +65,15 @@ require(foreach)
 require(bbmle)
 require(pomp)
 
-# require(doMPI)
-# cl <- startMPIcluster(bcast=FALSE)
-# registerDoMPI(cl)
-
-require(doMC)
-registerDoMC()
+mpi <- !is.na(as.integer(Sys.getenv("OMPI_COMM_WORLD_SIZE")))
+if (mpi) {
+    require(doMPI)
+    cl <- startMPIcluster(bcast=FALSE)
+    registerDoMPI(cl)
+} else {
+    require(doMC)
+    registerDoMC()
+}
 ```
 
 # Preparations
@@ -561,8 +564,10 @@ pairs(~loglik+theta+rho+delta+tau1+tau2,
 ```
 
 ```{r stop-mpi,include=FALSE}
-if (exists("cl")) closeCluster(cl)
-try(detach("package:doMPI",unload=TRUE),silent=TRUE)
-if (exists("mpi.exit")) mpi.exit()
-try(detach("package:Rmpi",unload=TRUE),silent=TRUE)
+if (mpi) {
+    closeCluster(cl)
+    try(detach("package:doMPI",unload=TRUE),silent=TRUE)
+    mpi.exit()
+    try(detach("package:Rmpi",unload=TRUE),silent=TRUE)
+}
 ```
