@@ -108,6 +108,7 @@ bake(file="ew_measles_data.rds",{
 ```
 
 In the above:
+
 1. Measles data is weekly; dates given correspond to Sunday.
 1. Associate each week's data with the Weds. of that week.
 1. Discard any 53rd weeks (1947,1952,1958,1964).
