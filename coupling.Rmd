@@ -564,6 +564,14 @@ pairs(~loglik+theta+rho+delta+tau1+tau2,
       subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
+## Next steps
+
+1. Zero-inflated or negative binomial model?
+1. Stouffer model
+1. Solve optimization issues
+1. Revisit $\sigma$ profile
+1. Revisit TSIR fitting (include residuals?)
+
 ```{r stop-mpi,include=FALSE}
 if (mpi) {
     closeCluster(cl)
