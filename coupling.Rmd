@@ -5,6 +5,7 @@ output:
     theme: default
     toc: yes
 csl: ../ecology.csl
+    toc_depth: 2
 ---
 
 \newcommand\prob[1]{\mathbb{P}\left[{#1}\right]}
@@ -450,6 +451,116 @@ results %>%
     labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
+```{r gravity-pairsplot,fig.height=6.83,purl=FALSE}
+pairs(~loglik+theta+rho+tau1+tau2,
+      data=results,
+      subset=loglik>max(loglik)-10000,cex=0.5)
+```
+
+# The Xia model
+
+The model of @Xia2004 is
+$$\iota_i=\theta N_i^{\tau_1} \sum_{j\ne i}\! I_j^{\tau_2} d_{ij}^{-\rho}.$$
+Let
+$$Q_{ij}=\begin{cases}N_i^{\tau_2}\,d_{ij}^{-\rho}, &i\ne j\\0, &i=j\end{cases}$$ and
+$$y_{i}=\frac{I_i}{N_i}.$$
+
+Expressed compactly, the @Xia2004 model is
+$$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y^{\tau_2}.$$
+
+The negative log likelihood function for the @Xia2004 model is:
+```{r xia-like}
+likfnXia <- function (theta, rho, tau1, tau2) {
+  theta <- exp(theta)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  iota <- theta*(N^tau1)*crossprod(Q,ylag^tau2)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+}
+```
+
+Now we test the likelihood function by attempting to maximize it.
+```{r xia-test,purl=FALSE}
+par <- list(theta=-8, rho=0, tau1=0.5, tau2=0.5)
+with(par,likfnXia(theta,rho,tau1,tau2))
+
+bake(file="xia-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnXia,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=1000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+summary(test)
+
+with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),tau1=tau1,tau2=tau2))
+
+vcov(test)
+cov2cor(vcov(test))
+```
+
+```{r xia-profile-2D}
+bake(file="xia.rds",{
+  
+  grd <- expand.grid(
+    tau1=seq(0.1, 1.4, by=.05), 
+    tau2=seq(-1, 1, by=.05),
+    rho=log(1.0),
+    theta=log(0.0001)
+  )
+  
+  tic <- Sys.time()
+  
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .options.mpi=list(seed=95886868,chunkSize=1),
+          .packages="bbmle"
+  ) %do% try(
+    {
+      mle2(likfnXia,
+           method="Nelder-Mead",
+           start=as.list(start[c("rho","theta")]),
+           fixed=as.list(start[c("tau1","tau2")]), 
+           control=list(trace=0,maxit=1000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
+    }
+  ) -> results
+  
+  toc <- Sys.time()
+  print(toc-tic)
+  
+  results
+}) -> results
+
+results %>%
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
+
+results %<>%
+  extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() 
+
+results %>%
+    ggplot(aes(x=tau1,y=tau2,z=loglik,
+               fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
+    geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+    labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+```
+
+```{r xia-pairsplot,fig.height=6.83,purl=FALSE}
+pairs(~loglik+theta+rho+tau1+tau2,
+      data=results,
+      subset=loglik>max(loglik)-10000,cex=0.5)
+```
+
 # Competing destination model on E&W measles data using fade-out survival analysis
 
 The competing destination model is
@@ -558,13 +669,13 @@ results %>%
     labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r compdest-pairsplot,fig.height=6.83}
+```{r compdest-pairsplot,fig.height=6.83,purl=FALSE}
 pairs(~loglik+theta+rho+delta+tau1+tau2,
       data=results,
       subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
-## Next steps
+# Next steps
 
 1. Zero-inflated or negative binomial model?
 1. Stouffer model
