@@ -4,8 +4,9 @@ output:
   html_document:
     theme: default
     toc: yes
-csl: ../ecology.csl
     toc_depth: 2
+bibliography: gravity.bib
+csl: ecology.csl
 ---
 
 \newcommand\prob[1]{\mathbb{P}\left[{#1}\right]}
@@ -691,3 +692,5 @@ if (mpi) {
     try(detach("package:Rmpi",unload=TRUE),silent=TRUE)
 }
 ```
+
+# References
