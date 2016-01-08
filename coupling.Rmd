@@ -435,7 +435,9 @@ bake(file="gravity.rds",{
   
   results
 }) -> results
+```
 
+```{r gravity-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -509,10 +511,10 @@ cov2cor(vcov(test))
 bake(file="xia.rds",{
   
   grd <- expand.grid(
-    tau1=seq(0.1, 1.4, by=.05), 
-    tau2=seq(-1, 1, by=.05),
+    tau1=seq(0.1, 2, length=25), 
+    tau2=seq(0.1, 2, length=25),
     rho=log(1.0),
-    theta=log(0.0001)
+    theta=log(1e-6)
   )
   
   tic <- Sys.time()
@@ -539,7 +541,9 @@ bake(file="xia.rds",{
   
   results
 }) -> results
+```
 
+```{r xia-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -652,7 +656,9 @@ bake(file="compdest.rds",{
   
   results
 }) -> results
+```
 
+```{r compdest-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
