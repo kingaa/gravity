@@ -405,8 +405,8 @@ cov2cor(vcov(test))
 bake(file="gravity.rds",{
   
   grd <- expand.grid(
-    tau1=seq(0.1, 1.4, by=.05), 
-    tau2=seq(-1, 1, by=.05),
+    tau1=seq(0.1, 1.4, length=25), 
+    tau2=seq(-1, 1, length=25),
     rho=log(1.0),
     theta=log(0.0001)
   )
@@ -625,8 +625,8 @@ cov2cor(vcov(test))
 bake(file="compdest.rds",{
   
   grd <- expand.grid(
-    tau1=seq(0.1, 1.4, by=.05), 
-    tau2=seq(-1, 1, by=.05),
+    tau1=seq(0.1, 1.4, length=25),
+    tau2=seq(-1, 1, length=25),
     rho=log(1.0),
     theta=log(1),
     delta=0
@@ -682,10 +682,111 @@ pairs(~loglik+theta+rho+delta+tau1+tau2,
       subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
+# Wonky competing destinations
+
+The negative log likelihood function for the wonky competing destinations model is:
+```{r wonk-compdest-like}
+likfnWonkCompDest <- function (theta, rho, tau1, tau2, delta) {
+  theta <- exp(theta)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  R <- crossprod(Q,iii)^delta
+  iota <- theta*(N^tau1)*crossprod(Q*R,ylag^tau2)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+}
+```
+
+Now we test the likelihood function by attempting to maximize it.
+```{r wonk-compdest-test,purl=FALSE}
+par <- list(theta=0, rho=0, tau1=0.5, tau2=0.5, delta=0)
+with(par,likfnCompDest(theta,rho,tau1,tau2,delta))
+
+bake(file="wonkcompdest-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnWonkCompDest,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=4000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+summary(test)
+
+with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),delta=delta,tau1=tau1,tau2=tau2))
+
+vcov(test)
+cov2cor(vcov(test))
+```
+
+```{r wonk-compdest-profile-2D}
+bake(file="wonkcompdest.rds",{
+  
+  grd <- expand.grid(
+    tau1=seq(0.1, 1.4, length=25),
+    tau2=seq(-1, 1, length=25),
+    rho=log(1.0),
+    theta=log(1),
+    delta=0
+  )
+  
+  tic <- Sys.time()
+  
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .options.mpi=list(seed=95886868,chunkSize=1),
+          .packages="bbmle"
+  ) %do% try(
+    {
+      mle2(likfnWonkCompDest,
+           method="Nelder-Mead",
+           start=as.list(start[c("rho","theta","delta")]),
+           fixed=as.list(start[c("tau1","tau2")]), 
+           control=list(trace=0,maxit=4000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
+    }
+  ) -> results
+  
+  toc <- Sys.time()
+  print(toc-tic)
+  
+  results
+}) -> results
+```
+
+```{r wonk-compdest-results,purl=FALSE}
+results %>%
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
+
+results %<>%
+  extract(!sapply(results,inherits,"try-error")) %>%
+  ldply() 
+
+results %>%
+  ggplot(aes(x=tau1,y=tau2,z=loglik,
+             fill=ifelse(loglik>max(loglik)-2000,
+                         loglik,NA)))+
+    geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+    labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+```
+
+```{r wonk-compdest-pairsplot,fig.height=6.83,purl=FALSE}
+pairs(~loglik+theta+rho+delta+tau1+tau2,
+      data=results,
+      subset=loglik>max(loglik)-10000,cex=0.5)
+```
+
+
 # Next steps
 
-1. Zero-inflated or negative binomial model?
 1. Stouffer model
+1. Zero-inflated or negative binomial model?
 1. Solve optimization issues
 1. Revisit $\sigma$ profile
 1. Revisit TSIR fitting (include residuals?)
