@@ -1,5 +1,5 @@
 ---
-title: "Spatial coupling in measles"
+title: "Spatial coupling in measles via fade-out survival analysis"
 output:
   html_document:
     theme: default
@@ -306,10 +306,8 @@ bake(file="distances.rds",{
 }) -> distances
 ```
 
-
-Shat is fitted to each individually
-Sbar is fitted globally (with some towns excluded)
-
+- `Shat` is fitted to each individually.
+- `Sbar` is fitted globally (with some towns excluded).
 
 # Coupling the cities.
 
@@ -439,12 +437,12 @@ bake(file="gravity.rds",{
 
 ```{r gravity-results,purl=FALSE}
 results %>%
-  extract(sapply(results,inherits,"try-error")) %>%
-  sapply(as.character) %>%
-  unique()
+    extract(sapply(results,inherits,"try-error")) %>%
+    sapply(as.character) %>%
+    unique()
 
 results %<>%
-  extract(!sapply(results,inherits,"try-error")) %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
     ldply() 
 
 results %>%
@@ -452,6 +450,9 @@ results %>%
                fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
     geom_tile(color=NA)+geom_contour(bins=100,color='white')+
     labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+
+results %>%
+    subset(loglik==max(loglik)) -> mle.grav
 ```
 
 ```{r gravity-pairsplot,fig.height=6.83,purl=FALSE}
@@ -460,7 +461,7 @@ pairs(~loglik+theta+rho+tau1+tau2,
       subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
-# The Xia model
+# The Xia (wonky gravity) model
 
 The model of @Xia2004 is
 $$\iota_i=\theta N_i^{\tau_1} \sum_{j\ne i}\! I_j^{\tau_2} d_{ij}^{-\rho}.$$
@@ -558,6 +559,9 @@ results %>%
                fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
     geom_tile(color=NA)+geom_contour(bins=100,color='white')+
     labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+
+results %>%
+    subset(loglik==max(loglik)) -> mle.xia
 ```
 
 ```{r xia-pairsplot,fig.height=6.83,purl=FALSE}
@@ -566,9 +570,9 @@ pairs(~loglik+theta+rho+tau1+tau2,
       subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
-# Competing destination model on E&W measles data using fade-out survival analysis
+# Competing destinations model
 
-The competing destination model is
+The competing destinations model is
 $$\iota_i=\theta N_i^{\tau_1} \sum_j\frac{N_j^{\tau_2}}{d_{ij}^\rho}\,\left(\sum_{k \ne i, j}\frac{N_k^{\tau_2}}{d_{jk}^\rho}\right)^\delta\,\frac{I_j}{N_j}$$
 note that the $\tau_2$ and $\rho$ coefficients are the same as in the gravity model, so the whole thing would be
 
@@ -674,6 +678,9 @@ results %>%
                          loglik,NA)))+
     geom_tile(color=NA)+geom_contour(bins=100,color='white')+
     labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+
+results %>%
+    subset(loglik==max(loglik)) -> mle.compdest
 ```
 
 ```{r compdest-pairsplot,fig.height=6.83,purl=FALSE}
@@ -685,6 +692,7 @@ pairs(~loglik+theta+rho+delta+tau1+tau2,
 # Wonky competing destinations
 
 The negative log likelihood function for the wonky competing destinations model is:
+
 ```{r wonk-compdest-like}
 likfnWonkCompDest <- function (theta, rho, tau1, tau2, delta) {
   theta <- exp(theta)
@@ -698,6 +706,7 @@ likfnWonkCompDest <- function (theta, rho, tau1, tau2, delta) {
 ```
 
 Now we test the likelihood function by attempting to maximize it.
+
 ```{r wonk-compdest-test,purl=FALSE}
 par <- list(theta=0, rho=0, tau1=0.5, tau2=0.5, delta=0)
 with(par,likfnCompDest(theta,rho,tau1,tau2,delta))
@@ -774,6 +783,9 @@ results %>%
                          loglik,NA)))+
     geom_tile(color=NA)+geom_contour(bins=100,color='white')+
     labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+
+results %>%
+    subset(loglik==max(loglik)) -> mle.wonkcompdest
 ```
 
 ```{r wonk-compdest-pairsplot,fig.height=6.83,purl=FALSE}
@@ -782,14 +794,185 @@ pairs(~loglik+theta+rho+delta+tau1+tau2,
       subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
+# Stouffer model
+
+Let $i$ be the recipient town; $j$, the donor.
+Let $S(i,j)$ be the collection of towns closer to town $i$ than $j$ is.
+That is, $S(i,j) = \{k: d(i,k) < d(i,j)\}$.
+
+$$\iota_i = \theta\,N_i^{\tau_1}\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}$$
+
+
+```{r rankmat}
+bake(file="rankmat.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      rr[i,j] <- N[j]/sum(N[distances[i,]<distances[i,j]])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
+```
+
+```{r stouffer-like}
+likfnStouffer <- function (theta, tau1, tau2) {
+  theta <- exp(theta)
+  iota <- theta*(N^tau1)*((rr^tau2)%*%ylag)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+}
+```
+
+```{r stouffer-test,purl=FALSE}
+par <- list(theta=0, tau1=0.5, tau2=0.5)
+with(par,likfnStouffer(theta,tau1,tau2))
+
+bake(file="stouffer-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnStouffer,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=4000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+summary(test)
+
+with(as.list(coef(test)),c(exp(c(theta=theta)),tau1=tau1,tau2=tau2))
+
+vcov(test)
+cov2cor(vcov(test))
+```
+
+```{r stouffer-profile-2D}
+bake(file="stouffer.rds",{
+  
+  grd <- expand.grid(
+    tau1=seq(0.1, 1.4, length=25),
+    tau2=seq(-1, 1, length=25),
+    theta=log(1)
+  )
+  
+  tic <- Sys.time()
+  
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .options.mpi=list(seed=95886868,chunkSize=1),
+          .packages="bbmle"
+  ) %do% try(
+    {
+      mle2(likfnStouffer,
+           method="Brent",
+           lower=-20,upper=20,
+           start=as.list(start[c("theta")]),
+           fixed=as.list(start[c("tau1","tau2")]), 
+           control=list(trace=0,maxit=4000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
+    }
+  ) -> results
+  
+  toc <- Sys.time()
+  print(toc-tic)
+  
+  results
+}) -> results
+```
+
+```{r stouffer-results,purl=FALSE}
+results %>%
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
+
+results %<>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    subset(is.finite(loglik))
+
+results %>%
+  ggplot(aes(x=tau1,y=tau2,z=loglik,
+             fill=ifelse(loglik>max(loglik,na.rm=TRUE)-2000,
+                         loglik,NA)))+
+    geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+    labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+
+results %>%
+    subset(loglik==max(loglik)) -> mle.stouffer
+```
+
+```{r stouffer-pairsplot,fig.height=6.83,purl=FALSE}
+pairs(~loglik+theta+tau1+tau2,
+      data=results,
+      subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
+```
+
+# Model comparison
+
+```{r modelcomp,cache=FALSE,echo=FALSE}
+list(gravity=mle.grav,xia=mle.xia,comp.dest=mle.compdest,
+     wonky.comp.dest=mle.wonkcompdest,stouffer=mle.stouffer) %>%
+    ldply(.id="model") %>%
+    arrange(-loglik) %>%
+    kable(digits=3)
+```
+
+```{r include=FALSE,eval=FALSE,purl=FALSE}
+dist=distSel
+diag(dist)=Inf
+
+rankMat=matrix(0, ncol=dim(distSel)[2], nrow=dim(distSel)[1])
+
+for(i in 1:952){
+  for(j in 1:952){
+    rankMat[i,j]=PuSel[j]/sum(PuSel[dist[i,j]>dist[i,]])
+  }}
+
+plot(rankMat[1,], dist[1,], log='xy')
+
+diag(rankMat)=0
+
+rankMat[!is.finite(rankMat)]=0
+
+par <- c(theta=-15, tau1=0, tau2=-1)
+
+ySel <- t(MuSel)/PuSel
+fadeout <- ySel==0
+S <- t(SuSel)
+beta <- t(exp(betaSel))
+
+relevant <- which(fadeout[,-546])
+obs <- fadeout[,-1][relevant]
+
+likfn2 <- function (theta, tau1, tau2) {
+  theta <- exp(theta)
+  tau1<-exp(tau1)
+  tau2<-exp(tau2)
+  iotaSel <- theta*(PuSel^tau1)*(rankMat^tau2%*%ySel)
+  lambda <- beta*S*iotaSel^alpha
+  prob <- exp(-lambda[relevant])
+  #print(sum(!is.finite(prob)))
+  -sum(log(ifelse(obs,prob,1-prob)))
+}
+
+test2<-mle2(likfn2, start=list(theta=-1, tau1=-3, tau2=-0), control=list(trace=4), method='Nelder-Mead')
+ctest2<-confint(test2)
+ptest2<-profile(test2)
+```
+
 
 # Next steps
 
-1. Stouffer model
 1. Zero-inflated or negative binomial model?
 1. Solve optimization issues
 1. Revisit $\sigma$ profile
 1. Revisit TSIR fitting (include residuals?)
+1. Include references for the various models.
 
 ```{r stop-mpi,include=FALSE}
 if (mpi) {
