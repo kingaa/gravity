@@ -798,7 +798,7 @@ pairs(~loglik+theta+rho+delta+tau1+tau2,
 
 Let $i$ be the recipient town; $j$, the donor.
 Let $S(i,j)$ be the collection of towns closer to town $i$ than $j$ is.
-That is, $S(i,j) = \{k: d(i,k) < d(i,j)\}$.
+That is, $S(i,j) = \{k: k\ne i \ \&\ d(i,k) \le d(i,j)\}$.
 
 $$\iota_i = \theta\,N_i^{\tau_1}\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}$$
 
@@ -808,7 +808,7 @@ bake(file="rankmat.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
     for (j in seq_along(N)) {
-      rr[i,j] <- N[j]/sum(N[distances[i,]<distances[i,j]])
+      rr[i,j] <- N[j]/(sum(N[distances[i,]<=distances[i,j]])-N[i])
     }
   }
   diag(rr) <- 0
@@ -853,7 +853,7 @@ bake(file="stouffer.rds",{
   
   grd <- expand.grid(
     tau1=seq(0.1, 1.4, length=25),
-    tau2=seq(-1, 1, length=25),
+    tau2=seq(-0.1, 1.5, length=25),
     theta=log(1)
   )
   
@@ -914,7 +914,7 @@ pairs(~loglik+theta+tau1+tau2,
 
 # Model comparison
 
-```{r modelcomp,cache=FALSE,echo=FALSE}
+```{r modelcomp,cache=FALSE,echo=FALSE,purl=FALSE}
 list(gravity=mle.grav,xia=mle.xia,comp.dest=mle.compdest,
      wonky.comp.dest=mle.wonkcompdest,stouffer=mle.stouffer) %>%
     ldply(.id="model") %>%
@@ -965,6 +965,9 @@ ctest2<-confint(test2)
 ptest2<-profile(test2)
 ```
 
+# Radiation model
+
+$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
 
 # Next steps
 
