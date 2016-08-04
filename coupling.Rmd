@@ -912,61 +912,247 @@ pairs(~loglik+theta+tau1+tau2,
       subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
 ```
 
+## Variant: Stouffer model with recipient included
+
+Let $i$ be the recipient town; $j$, the donor.
+Let $S'(i,j)$ be the collection of towns closer to town $i$ than $j$ is.
+That is, $S'(i,j) = \{k: d(i,k) \le d(i,j)\}$.
+Note that $S'(i,j)$ includes $i$, whilst $S(i,j)$ does not. 
+
+$$\iota_i = \theta\,N_i^{\tau_1}\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S'(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}$$
+
+
+```{r rankmat1}
+bake(file="rankmat1.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      rr[i,j] <- N[j]/sum(N[distances[i,]<=distances[i,j]])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
+```
+
+```{r stouffer1-like}
+likfnStouffer1 <- function (theta, tau1, tau2) {
+  theta <- exp(theta)
+  iota <- theta*(N^tau1)*((rr^tau2)%*%ylag)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+}
+```
+
+```{r stouffer1-test,purl=FALSE}
+par <- list(theta=0, tau1=0.5, tau2=0.5)
+with(par,likfnStouffer1(theta,tau1,tau2))
+
+bake(file="stouffer1-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnStouffer1,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=4000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+summary(test)
+```
+
+```{r stouffer1-profile-2D}
+bake(file="stouffer1.rds",{
+  
+  grd <- expand.grid(
+    tau1=seq(0.1, 1.4, length=25),
+    tau2=seq(-0.1, 1.5, length=25),
+    theta=log(1)
+  )
+  
+  tic <- Sys.time()
+  
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .options.mpi=list(seed=95886868,chunkSize=1),
+          .packages="bbmle"
+  ) %do% try(
+    {
+      mle2(likfnStouffer1,
+           method="Brent",
+           lower=-20,upper=20,
+           start=as.list(start[c("theta")]),
+           fixed=as.list(start[c("tau1","tau2")]), 
+           control=list(trace=0,maxit=4000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
+    }
+  ) -> results
+  
+  toc <- Sys.time()
+  print(toc-tic)
+  
+  results
+}) -> results
+```
+
+```{r stouffer1-results,purl=FALSE}
+results %>%
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
+
+results %<>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    subset(is.finite(loglik))
+
+results %>%
+  ggplot(aes(x=tau1,y=tau2,z=loglik,
+             fill=ifelse(loglik>max(loglik,na.rm=TRUE)-2000,
+                         loglik,NA)))+
+    geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+    labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+
+results %>%
+    subset(loglik==max(loglik)) -> mle.stouffer1
+```
+
+```{r stouffer1-pairsplot,fig.height=6.83,purl=FALSE}
+pairs(~loglik+theta+tau1+tau2,
+      data=results,
+      subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
+```
+
+
 # Radiation model
 
 $$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
 
+```{r radmat}
+bake(file="radmat.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      s <- sum(N[distances[i,]<=distances[i,j]])
+      rr[i,j] <- N[i]*N[j]*N[j]/s/(s-N[i])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
+```
+
+```{r radiation-like}
+likfnRadiation <- function (theta) {
+  theta <- exp(theta)
+  iota <- theta*(rr%*%ylag)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+}
+```
+
+```{r radiation-fit,purl=FALSE}
+par <- list(theta=0)
+with(par,likfnRadiation(theta))
+
+bake(file="radiation.rds",{
+  mle2(likfnRadiation,
+       method="Brent",
+       lower=-20,upper=20,
+       start=par,
+       control=list(trace=0,maxit=4000))
+}) -> fit
+
+summary(fit)
+
+with(as.list(coef(fit)),c(exp(c(theta=theta))))
+
+exp(confint(fit))
+```
+
+```{r radiation-results,purl=FALSE,include=FALSE}
+c(coef(fit),loglik=logLik(fit)) %>%
+  as.list() %>% as.data.frame() -> mle.radiation
+```
+
+## Variant: radiation model with recipient included
+
+$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}$$
+
+```{r radmat1}
+bake(file="radmat1.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      s <- sum(N[distances[i,]<=distances[i,j]])
+      rr[i,j] <- N[i]*N[j]*N[j]/(s+N[i])/(s)
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
+```
+
+```{r radiation1-like}
+likfnRadiation1 <- function (theta) {
+  theta <- exp(theta)
+  iota <- theta*(rr%*%ylag)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+}
+```
+
+```{r radiation1-fit,purl=FALSE}
+par <- list(theta=0)
+with(par,likfnRadiation1(theta))
+
+bake(file="radiation1.rds",{
+  mle2(likfnRadiation1,
+       method="Brent",
+       lower=-20,upper=20,
+       start=par,
+       control=list(trace=0,maxit=4000))
+}) -> fit
+
+summary(fit)
+
+with(as.list(coef(fit)),c(exp(c(theta=theta))))
+
+exp(confint(fit))
+```
+
+```{r radiation1-results,purl=FALSE,include=FALSE}
+c(coef(fit),loglik=logLik(fit)) %>%
+  as.list() %>% as.data.frame() -> mle.radiation1
+```
+
+
 # Model comparison
 
 ```{r modelcomp,cache=FALSE,echo=FALSE,purl=FALSE}
-list(gravity=mle.grav,xia=mle.xia,comp.dest=mle.compdest,
-     wonky.comp.dest=mle.wonkcompdest,stouffer=mle.stouffer) %>%
+list(gravity=mle.grav,
+     xia=mle.xia,
+     comp.dest=mle.compdest,
+     wonky.comp.dest=mle.wonkcompdest,
+     stouffer=mle.stouffer,
+     stouffer.variant=mle.stouffer1,
+     radiation=mle.radiation,
+     radiation.variant=mle.radiation) %>%
   ldply(.id="model") %>%
   arrange(-loglik) %>%
   rename(c(theta="log theta",rho="log rho")) %>%
   kable(digits=3)
 ```
 
-```{r include=FALSE,eval=FALSE,purl=FALSE}
-dist=distSel
-diag(dist)=Inf
-
-rankMat=matrix(0, ncol=dim(distSel)[2], nrow=dim(distSel)[1])
-
-for(i in 1:952){
-  for(j in 1:952){
-    rankMat[i,j]=PuSel[j]/sum(PuSel[dist[i,j]>dist[i,]])
-  }}
-diag(rankMat)=0
-
-rankMat[!is.finite(rankMat)]=0
-
-par <- c(theta=-15, tau1=0, tau2=-1)
-
-ySel <- t(MuSel)/PuSel
-fadeout <- ySel==0
-S <- t(SuSel)
-beta <- t(exp(betaSel))
-
-relevant <- which(fadeout[,-546])
-obs <- fadeout[,-1][relevant]
-
-likfn2 <- function (theta, tau1, tau2) {
-  theta <- exp(theta)
-  tau1<-exp(tau1)
-  tau2<-exp(tau2)
-  iotaSel <- theta*(PuSel^tau1)*(rankMat^tau2%*%ySel)
-  lambda <- beta*S*iotaSel^alpha
-  prob <- exp(-lambda[relevant])
-  #print(sum(!is.finite(prob)))
-  -sum(log(ifelse(obs,prob,1-prob)))
-}
-```
 
 # Next steps
 
-1. Zero-inflated or negative binomial model?
 1. Solve optimization issues
+1. Random effects.
+1. Zero-inflated or negative binomial model?
 1. Revisit $\sigma$ profile
 1. Revisit TSIR fitting (include residuals?)
 1. Include references for the various models.
