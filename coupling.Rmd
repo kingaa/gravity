@@ -912,14 +912,19 @@ pairs(~loglik+theta+tau1+tau2,
       subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
 ```
 
+# Radiation model
+
+$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
+
 # Model comparison
 
 ```{r modelcomp,cache=FALSE,echo=FALSE,purl=FALSE}
 list(gravity=mle.grav,xia=mle.xia,comp.dest=mle.compdest,
      wonky.comp.dest=mle.wonkcompdest,stouffer=mle.stouffer) %>%
-    ldply(.id="model") %>%
-    arrange(-loglik) %>%
-    kable(digits=3)
+  ldply(.id="model") %>%
+  arrange(-loglik) %>%
+  rename(c(theta="log theta",rho="log rho")) %>%
+  kable(digits=3)
 ```
 
 ```{r include=FALSE,eval=FALSE,purl=FALSE}
@@ -932,9 +937,6 @@ for(i in 1:952){
   for(j in 1:952){
     rankMat[i,j]=PuSel[j]/sum(PuSel[dist[i,j]>dist[i,]])
   }}
-
-plot(rankMat[1,], dist[1,], log='xy')
-
 diag(rankMat)=0
 
 rankMat[!is.finite(rankMat)]=0
@@ -959,15 +961,7 @@ likfn2 <- function (theta, tau1, tau2) {
   #print(sum(!is.finite(prob)))
   -sum(log(ifelse(obs,prob,1-prob)))
 }
-
-test2<-mle2(likfn2, start=list(theta=-1, tau1=-3, tau2=-0), control=list(trace=4), method='Nelder-Mead')
-ctest2<-confint(test2)
-ptest2<-profile(test2)
 ```
-
-# Radiation model
-
-$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
 
 # Next steps
 
