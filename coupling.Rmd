@@ -1,12 +1,15 @@
 ---
 title: "Spatial coupling in measles via fade-out survival analysis"
+csl: ecology.csl
 output:
   html_document:
     theme: default
     toc: yes
     toc_depth: 2
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
 bibliography: gravity.bib
-csl: ecology.csl
 ---
 
 \newcommand\prob[1]{\mathbb{P}\left[{#1}\right]}
@@ -89,7 +92,7 @@ bake(file="ew_measles_data.rds",{
   require(aakmisc)
   options(aakmisc.dbname="ewmeasles",aakmisc.remotehost="kinglab.eeb.lsa.umich.edu")
   
-  startTunnel()
+  startTunnel(user="gravity")
   
   getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
 
@@ -1140,16 +1143,349 @@ list(gravity=mle.grav,
      stouffer=mle.stouffer,
      stouffer.variant=mle.stouffer1,
      radiation=mle.radiation,
-     radiation.variant=mle.radiation) %>%
+     radiation.variant=mle.radiation1) %>%
   ldply(.id="model") %>%
   arrange(-loglik) %>%
   rename(c(theta="log theta",rho="log rho")) %>%
   kable(digits=3)
 ```
 
+To study whether better statistical fit translates to meaningful improvement on prediction on incidence we can look at CCS patterns:
+
+```
+dat$E=dat$cases==0 
+dat %>% ddply(~town,summarize,mean(E)) -> ext
+plot(ext[,2]~N)
+```
+
+We can predict importation rates from fitted models
+
+```{r iota-plot,fig.height=6.83,purl=FALSE}
+#Gravity
+bake(file="gravity-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnGravity,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=1000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+
+
+cfs=with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),tau1=tau1,tau2=tau2))
+
+Q<-with(as.list(cfs),
+ (N^tau2)*(dd^rho)
+)
+
+iotagr<-apply(
+with(as.list(cfs),
+  theta*(N^tau1)*crossprod(Q,ylag)
+),1,mean)
+
+plot(iotagr~N, log="xy", ylab="imports")
+
+#Xia
+bake(file="xia-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnXia,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=1000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+summary(test)
+
+cfs<-with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),tau1=tau1,tau2=tau2))
+ Q <- with(as.list(cfs),
+ (N^tau2)*(dd^rho))
+
+iotaxi<-apply(
+with(as.list(cfs),
+  theta*(N^tau1)*crossprod(Q,ylag^tau2)
+),1,mean)
+
+points(iotaxi~N, col=2)
+
+#CD
+bake(file="compdest-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnCompDest,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=4000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+cfs<-with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),delta=delta,tau1=tau1,tau2=tau2))
+ Q <- with(as.list(cfs),
+ (N^tau2)*(dd^rho))
+
+iii <- 1-diag(length(N))
+
+ R <- with(as.list(cfs),
+ crossprod(Q,iii)^delta)
+
+iotacd<-apply(
+with(as.list(cfs),
+theta*(N^tau1)*crossprod(Q*R,ylag)
+),1,mean)
+
+points(iotacd~N, col=3)
+
+#WCD
+bake(file="wonkcompdest-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnWonkCompDest,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=4000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+cfs<-with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),delta=delta,tau1=tau1,tau2=tau2))
+ Q <- with(as.list(cfs),
+ (N^tau2)*(dd^rho))
+
+iii <- 1-diag(length(N))
+
+ R <- with(as.list(cfs),
+crossprod(Q,iii)^delta)
+
+iotawc<-apply(
+with(as.list(cfs),
+theta*(N^tau1)*crossprod(Q*R,ylag^tau2)
+),1,mean)
+
+points(iotawc~N, col=4)
+
+#Stouffer
+bake(file="rankmat.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      rr[i,j] <- N[j]/(sum(N[distances[i,]<=distances[i,j]])-N[i])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
+
+bake(file="stouffer-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnStouffer,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=4000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+
+cfs<-with(as.list(coef(test)),c(exp(c(theta=theta)),tau1=tau1,tau2=tau2))
+
+iotast <-apply(
+with(as.list(cfs), theta*(N^tau1)*((rr^tau2)%*%ylag)
+),1,mean)
+points(iotast~N, col=5)
+
+
+
+#Stouffer variant
+bake(file="rankmat1.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      rr[i,j] <- N[j]/sum(N[distances[i,]<=distances[i,j]])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
+
+bake(file="stouffer1-test.rds",{
+    tic <- Sys.time()
+    test <- mle2(likfnStouffer1,
+                 method="Nelder-Mead",
+                 start=par,
+                 control=list(trace=0,maxit=4000))
+    toc <- Sys.time()
+    toc-tic
+    test
+}) -> test
+
+
+cfs<-with(as.list(coef(test)),c(exp(c(theta=theta)), tau1=tau1,tau2=tau2))
+
+iotavs <-apply(
+with(as.list(cfs), theta*(N^tau1)*((rr^tau2)%*%ylag)
+),1,mean)
+points(iotavs~N, col=5)
+
+#Radiation
+bake(file="radmat.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      s <- sum(N[distances[i,]<=distances[i,j]])
+      rr[i,j] <- N[i]*N[j]*N[j]/s/(s-N[i])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
+
+bake(file="radiation.rds",{
+  mle2(likfnRadiation,
+       method="Brent",
+       lower=-20,upper=20,
+       start=par,
+       control=list(trace=0,maxit=4000))
+}) -> fit
+
+cfs=with(as.list(coef(fit)),c(exp(c(theta=theta))))
+iotara <-apply(
+with(as.list(cfs), theta*(rr%*%ylag)
+),1,mean)
+
+#Radiation Variant
+bake(file="radmat1.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      s <- sum(N[distances[i,]<=distances[i,j]])
+      rr[i,j] <- N[i]*N[j]*N[j]/(s+N[i])/(s)
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
+
+bake(file="radiation1.rds",{
+  mle2(likfnRadiation1,
+       method="Brent",
+       lower=-20,upper=20,
+       start=par,
+       control=list(trace=0,maxit=4000))
+
+}) -> test
+
+cfs<-with(as.list(coef(test)),c(exp(c(theta=theta))))
+iotavr <-apply(
+with(as.list(cfs), theta*(rr%*%ylag)
+),1,mean)
+
+points(iotavr~N, col=6)
+legend("topleft",
+       legend=c("Gravity", "Xia", "Compdest",
+                "X Compdest", "V Stouffer", "V Radiat"),
+       pch=rep(21,6),
+        col=1:6)
+
+```
+
+We next create the fade-out plot
+```{r fadeout-plot,fig.height=6.83,purl=FALSE}
+dat$E=dat$cases==0 
+dat %>% ddply(~town,summarize,mean(E)) -> ext
+
+par(mfrow=c(1,1))
+par(mar = c(5,5,2,5))
+plot(ext[,2]~N, log="x", xlab="Pop.size", ylab="Presence")
+
+par(new=T)
+
+plot(log(ext[,2]/(1-ext[,2]))~N, log="x",type="p", col="red", axes=FALSE, xlab=NA, ylab=NA)
+axis(side = 4)
+mtext(side = 4, line = 4, "logit")
+legend("topright",
+       legend=c("Presence", "logit"),
+       pch=c(21,21),
+        col=c("black", "red"))
+```
+And do spatial plot of residuals 
+```{r residual-plot,fig.height=6.83,purl=FALSE}
+require(ncf)
+dfr=data.frame(lon=latlon$Long, lat=latlon$Lat, gr=iotagr, cd=iotacd, res=iotagr-iotacd)
+spatial.plot(dfr$lon, dfr$lat, edat$resE, inches=.1)
+title("excess fade-out")
+```
+Then generate deviations ffrom expectation based on size for all of the spatial models.
+```{r expectations from spatial models,purl=FALSE}
+edat=data.frame(N=N, E=ext, logitE=log(ext[,2]/(1-ext[,2])), 
+gr=iotagr,
+xi=iotaxi,
+cd=iotacd,
+wc=iotawc,
+st=iotast,
+vs=iotavs,
+ra=iotara,
+vr=iotavr
+)
+```
+
+And create residuals of all against log(N)
+
+```{r residuals}
+edat$logitE[edat$logitE==-Inf]=NA
+edat$resE=NA
+edat$resE[!is.na(edat$logitE)]=resid(lm(logitE~I(log(N)), data=edat, na.action=na.omit))
+edat%<>%mutate(resGR=resid(lm(log(gr)~I(log(N)))))
+edat%<>%mutate(resXI=resid(lm(log(xi)~I(log(N)))))
+edat%<>%mutate(resCD=resid(lm(log(cd)~I(log(N)))))
+edat%<>%mutate(resWC=resid(lm(log(wc)~I(log(N)))))
+edat%<>%mutate(resST=resid(lm(log(st)~I(log(N)))))
+edat%<>%mutate(resVS=resid(lm(log(vs)~I(log(N)))))
+edat%<>%mutate(resRA=resid(lm(log(ra)~I(log(N)))))
+edat%<>%mutate(resVR=resid(lm(log(vr)~I(log(N)))))
+```
+The correlation among residuals
+```{r cormat}
+round(cor(edat[,13:21], use="pairwise.complete"), 3)
+```
+Clearly the Comp-Dest versions are best.
+
+```{r corr plot}
+cc=matrix(NA, ncol=3, nrow=8)
+for(i in 1:8){
+  cc[i,]=cor.test(-edat[,13], edat[,13+i])$estimate
+  cc[i,2:3]=cor.test(-edat[,13], edat[,13+i])$conf.int[1:2]
+}
+cc=as.data.frame(cc)
+dimnames(cc)=list(c("GR", "XI", "CD", "xC", "ST", "SV", "RA", "RV"), c("Est", "L", "U"))
+
+require(plotrix)
+plotCI(cc[,1], ui=cc[,3], li=cc[,2], ylab="cor", xlab="")
+#text(1:8,0,c("GR", "XI", "CD", "xC", "ST", "SV", "RA", "RV"))
+axis(1, at=1:8, labels=c("GR", "XI", "CD", "xC", "ST", "SV", "RA", "RV"))
+```
+Plot of difference between Xia and xCD
+```{r difference plot}
+spatial.plot(dfr$lon, dfr$lat, log(edat$wc)-log(edat$xi), inches=.1)
+title("xCD vs Xia difference")
+```
+It may also be of interest to take a clustering approach to comparing model predictions...
+
+```{r k-means dendrogram of model predictions}
+hc = hclust(dist(t(edat[,14:21])))
+plot(hc)
+```
 
 # Next steps
 
+1. Expontial distance kernels
+1. qAICs and qBayes-weights in table 
 1. Solve optimization issues
 1. Random effects.
 1. Zero-inflated or negative binomial model?
