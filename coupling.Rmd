@@ -3,12 +3,21 @@ title: "Spatial coupling in measles via fade-out survival analysis"
 csl: ecology.csl
 output:
   html_document:
-    theme: default
+    code_folding: hide
+    df_print: kable
+    highlight: tango
+    dev: png
+    number_sections: no
     toc: yes
     toc_depth: 2
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
   pdf_document:
     toc: yes
-    toc_depth: '2'
+    toc_depth: 2
+    dev: png
+    df_print: kable
 bibliography: gravity.bib
 ---
 
@@ -56,27 +65,30 @@ opts_chunk$set(
 options(
   keep.source=TRUE,
   stringsAsFactors=FALSE,
-  encoding="UTF-8"
-  )
+  encoding="UTF-8",
+  aakmisc.dbname="ewmeasles",
+  aakmisc.remotehost="kinglab.eeb.lsa.umich.edu",
+  aakmisc.user="gravity")
 
 set.seed(594709947L)
-require(ggplot2)
+library(grid)
+library(plyr)
+library(reshape2)
+library(magrittr)
+library(foreach)
+library(iterators)
+library(bbmle)
+library(pomp)
+library(ggplot2)
 theme_set(theme_bw())
-require(grid)
-require(plyr)
-require(reshape2)
-require(magrittr)
-require(foreach)
-require(bbmle)
-require(pomp)
 
 mpi <- !is.na(as.integer(Sys.getenv("OMPI_COMM_WORLD_SIZE")))
 if (mpi) {
-    require(doMPI)
+    library(doMPI)
     cl <- startMPIcluster(bcast=FALSE)
     registerDoMPI(cl)
 } else {
-    require(doMC)
+    library(doMC)
     registerDoMC()
 }
 ```
@@ -89,10 +101,9 @@ Retrieve the data from the database.
 
 ```{r clean-data,purl=FALSE}
 bake(file="ew_measles_data.rds",{
-  require(aakmisc)
-  options(aakmisc.dbname="ewmeasles",aakmisc.remotehost="kinglab.eeb.lsa.umich.edu")
+  library(aakmisc)
   
-  startTunnel(user="gravity")
+  startTunnel()
   
   getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
 
@@ -273,7 +284,7 @@ bake(file="tsir-fits.rds",{
 
 Just for interest, let's plot $R_0$ as a function of city size.
 ```{r R0-plot,purl=FALSE}
-require(scales)
+library(scales)
 dat %>% ddply(~town,summarize,N=mean(Ps),
               beta=exp(mean(log.beta)),R0=beta*N) %>%
     ggplot(aes(x=N,y=R0))+geom_point()+
@@ -287,8 +298,7 @@ dat %>% ddply(~town,summarize,N=mean(Ps),
 Now let's compute the distances between the cities.
 ```{r distances}
 bake(file="distances.rds",{
-  require(aakmisc)
-  options(aakmisc.dbname="ewmeasles",aakmisc.remotehost="kinglab.eeb.lsa.umich.edu")
+  library(aakmisc)
   
   startTunnel()
   getQuery("select * from coords") %>%
@@ -296,7 +306,7 @@ bake(file="distances.rds",{
   stopTunnel()
   rownames(coords) <- coords$town
   
-  require(ncf)
+  library(ncf)
    
   ## compute distance matrix
   expand.grid(i=coords$town,j=coords$town) %>%
@@ -326,14 +336,17 @@ The quantity $\iota$ is the import rate, which we estimate using a variety of di
 
 # The gravity model
 
-The gravity model is
-$$\iota_i=\theta N_i^{\tau_1} \sum_{j\ne i}\! N_j^{\tau_2} d_{ij}^{-\rho}\,\frac{I_j}{N_j}.$$
+The gravity model (with intercept) is
+$$\iota_i=N_i^{\tau_1} \left(\theta\,\sum_{j\ne i}\! N_j^{\tau_2} d_{ij}^{-\rho}\,\frac{I_j}{N_j}+\phi\right).$$
 Let
 $$Q_{ij}=\begin{cases}N_i^{\tau_2}\,d_{ij}^{-\rho}, &i\ne j\\0, &i=j\end{cases}$$ and
 $$y_{i}=\frac{I_i}{N_i}.$$
 
 Expressed compactly, the gravity model is
-$$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y.$$
+$$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y+\phi\,N^{\tau_1}.$$
+
+We use **R**'s element-recycling feature, which allows us to write
+$$\mathrm{diag}(A)\,B=A\;*\;B.$$
 
 
 The following computes $y$, $S$, $\beta$, and the matrix of reciprocal distances.
@@ -368,11 +381,12 @@ betaS <- beta[relevant]*slag[relevant]
 
 The negative log likelihood function for the gravity model is:
 ```{r gravity-like}
-likfnGravity <- function (theta, rho, tau1, tau2) {
+likfnGravity <- function (theta, phi, rho, tau1, tau2) {
   theta <- exp(theta)
+  phi <- exp(phi)
   rho <- exp(rho)
   Q <- (N^tau2)*(dd^rho)
-  iota <- theta*(N^tau1)*crossprod(Q,ylag)
+  iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
   lambda <- betaS*iota[relevant]^alpha
   -sum(dpois(x=obs,lambda=lambda,log=TRUE))
 }
@@ -380,15 +394,15 @@ likfnGravity <- function (theta, rho, tau1, tau2) {
 
 Now we test the likelihood function by attempting to maximize it.
 ```{r gravity-test,purl=FALSE}
-par <- list(theta=-8, rho=0, tau1=0.5, tau2=0.5)
-with(par,likfnGravity(theta,rho,tau1,tau2))
+par <- list(theta=exp(-8), phi = 1e-15, rho=1, tau1=0.5, tau2=0.5)
+with(par,likfnGravity(log(theta),log(phi),log(rho),tau1,tau2))
 
 bake(file="gravity-test.rds",{
     tic <- Sys.time()
     test <- mle2(likfnGravity,
                  method="Nelder-Mead",
                  start=par,
-                 control=list(trace=0,maxit=1000))
+                 control=list(trace=4,maxit=1000))
     toc <- Sys.time()
     toc-tic
     test
@@ -396,7 +410,7 @@ bake(file="gravity-test.rds",{
 
 summary(test)
 
-with(as.list(coef(test)),c(exp(c(theta=theta,rho=rho)),tau1=tau1,tau2=tau2))
+with(as.list(coef(test)),c(exp(c(theta=theta,phi=phi,rho=rho)),tau1=tau1,tau2=tau2))
 
 vcov(test)
 cov2cor(vcov(test))
@@ -406,26 +420,29 @@ cov2cor(vcov(test))
 bake(file="gravity.rds",{
   
   grd <- expand.grid(
-    tau1=seq(0.1, 1.4, length=25), 
+    tau1=seq(0.1, 1.4, length=25),
     tau2=seq(-1, 1, length=25),
     rho=log(1.0),
-    theta=log(0.0001)
+    theta=log(0.0001),
+    phi=log(1e-12)
   )
   
   tic <- Sys.time()
   
+  library(doRNG)
+  registerDoRNG(95886868)
+  
   foreach(start=iter(grd,"row"),
           .errorhandling="pass",
           .inorder=FALSE,
-          .options.mpi=list(seed=95886868,chunkSize=1),
           .packages="bbmle"
   ) %do% try(
     {
       mle2(likfnGravity,
            method="Nelder-Mead",
-           start=as.list(start[c("rho","theta")]),
+           start=as.list(start[c("rho","theta","phi")]),
            fixed=as.list(start[c("tau1","tau2")]), 
-           control=list(trace=0,maxit=1000),
+           control=list(trace=0,maxit=2000),
            skip.hessian=TRUE) -> fit
       c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
     }
@@ -1415,14 +1432,14 @@ legend("topright",
         col=c("black", "red"))
 ```
 And do spatial plot of residuals 
-```{r residual-plot,fig.height=6.83,purl=FALSE}
-require(ncf)
+```{r residual-plot,fig.height=6.83,purl=FALSE,eval=F}
+library(ncf)
 dfr=data.frame(lon=latlon$Long, lat=latlon$Lat, gr=iotagr, cd=iotacd, res=iotagr-iotacd)
 spatial.plot(dfr$lon, dfr$lat, edat$resE, inches=.1)
 title("excess fade-out")
 ```
 Then generate deviations ffrom expectation based on size for all of the spatial models.
-```{r expectations from spatial models,purl=FALSE}
+```{r expectations from spatial models,purl=FALSE,eval=F}
 edat=data.frame(N=N, E=ext, logitE=log(ext[,2]/(1-ext[,2])), 
 gr=iotagr,
 xi=iotaxi,
@@ -1437,7 +1454,7 @@ vr=iotavr
 
 And create residuals of all against log(N)
 
-```{r residuals}
+```{r residuals,purl=FALSE,eval=F}
 edat$logitE[edat$logitE==-Inf]=NA
 edat$resE=NA
 edat$resE[!is.na(edat$logitE)]=resid(lm(logitE~I(log(N)), data=edat, na.action=na.omit))
@@ -1451,12 +1468,12 @@ edat%<>%mutate(resRA=resid(lm(log(ra)~I(log(N)))))
 edat%<>%mutate(resVR=resid(lm(log(vr)~I(log(N)))))
 ```
 The correlation among residuals
-```{r cormat}
+```{r cormat,purl=FALSE,eval=F}
 round(cor(edat[,13:21], use="pairwise.complete"), 3)
 ```
 Clearly the Comp-Dest versions are best.
 
-```{r corr plot}
+```{r corr plot,purl=FALSE,eval=F}
 cc=matrix(NA, ncol=3, nrow=8)
 for(i in 1:8){
   cc[i,]=cor.test(-edat[,13], edat[,13+i])$estimate
@@ -1465,24 +1482,35 @@ for(i in 1:8){
 cc=as.data.frame(cc)
 dimnames(cc)=list(c("GR", "XI", "CD", "xC", "ST", "SV", "RA", "RV"), c("Est", "L", "U"))
 
-require(plotrix)
+library(plotrix)
 plotCI(cc[,1], ui=cc[,3], li=cc[,2], ylab="cor", xlab="")
 #text(1:8,0,c("GR", "XI", "CD", "xC", "ST", "SV", "RA", "RV"))
 axis(1, at=1:8, labels=c("GR", "XI", "CD", "xC", "ST", "SV", "RA", "RV"))
 ```
 Plot of difference between Xia and xCD
-```{r difference plot}
+```{r difference plot,purl=FALSE,eval=F}
 spatial.plot(dfr$lon, dfr$lat, log(edat$wc)-log(edat$xi), inches=.1)
 title("xCD vs Xia difference")
 ```
 It may also be of interest to take a clustering approach to comparing model predictions...
 
-```{r k-means dendrogram of model predictions}
+```{r k-means dendrogram of model predictions,purl=FALSE,eval=F}
 hc = hclust(dist(t(edat[,14:21])))
 plot(hc)
 ```
 
 # Next steps
+
+1. Debug loglikelihood for Xia and gravity models
+2. Include intercept term to capture background
+1. Use negative binomial model
+3. Compare with "null" models (diffusion, independent)
+4. Model-model comparison of coupling matrices (which places are the strongest outliers) using likelihood residuals
+
+Plots:
+
+1. empirical CCS plot with residuals (how well do models capture the residuals?)
+1. likelihood comparison maps
 
 1. Expontial distance kernels
 1. qAICs and qBayes-weights in table 
