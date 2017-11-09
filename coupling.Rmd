@@ -424,7 +424,7 @@ bake(file="gravity.rds",{
     tau2=seq(-1, 1, length=25),
     rho=log(1.0),
     theta=log(0.0001),
-    phi=log(1e-12)
+    phi=log(0.0001)
   )
   
   tic <- Sys.time()
@@ -476,7 +476,7 @@ results %>%
 ```
 
 ```{r gravity-pairsplot,fig.height=6.83,purl=FALSE}
-pairs(~loglik+theta+rho+tau1+tau2,
+pairs(~loglik+theta+phi+rho+tau1+tau2,
       data=results,
       subset=loglik>max(loglik)-10000,cex=0.5)
 ```
