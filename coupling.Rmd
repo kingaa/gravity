@@ -507,6 +507,7 @@ Expressed compactly, the @xia2004measles model is
 $$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y^{\tau_2}+\phi\,N^{\tau_1}.$$
 
 The negative log likelihood function for the @xia2004measles model is:
+
 ```{r xia-like}
 likfnXia <- function (theta, phi, rho, psi, tau1, tau2) {
   theta <- exp(theta)
@@ -828,7 +829,7 @@ Let $i$ be the recipient town; $j$, the donor.
 Let $S(i,j)$ be the collection of towns closer to town $i$ than $j$ is.
 That is, $S(i,j) = \{k: k\ne i \ \&\ d(i,k) \le d(i,j)\}$.
 
-$$\iota_i = \theta\,N_i^{\tau_1}\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}$$
+$$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}+\phi\right).$$
 
 
 ```{r rankmat,cache=FALSE}
@@ -844,72 +845,74 @@ bake(file="rankmat.rds",{
 }) -> rr
 ```
 
+The negative log likelihood function for the @xia2004measles model is:
+
 ```{r stouffer-like}
-likfnStouffer <- function (theta, tau1, tau2) {
+likfnStouffer <- function (theta, phi, tau1, tau2, psi) {
   theta <- exp(theta)
-  iota <- theta*(N^tau1)*((rr^tau2)%*%ylag)
+  phi <- exp(phi)
+  iota <- (N^tau1)*(theta*((rr^tau2)%*%ylag)+phi)
   lambda <- betaS*iota[relevant]^alpha
-  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
 ```
 
-```{r stouffer-test,purl=FALSE}
-par <- list(theta=0, tau1=0.5, tau2=0.5)
-with(par,likfnStouffer(theta,tau1,tau2))
-
-bake(file="stouffer-test.rds",{
-    tic <- Sys.time()
-    test <- mle2(likfnStouffer,
-                 method="Nelder-Mead",
-                 start=par,
-                 control=list(trace=0,maxit=4000))
-    toc <- Sys.time()
-    toc-tic
-    test
-}) -> test
-
-summary(test)
-
-with(as.list(coef(test)),c(exp(c(theta=theta)),tau1=tau1,tau2=tau2))
-
-vcov(test)
-cov2cor(vcov(test))
-```
+We compute the profile likelihood as before.
 
 ```{r stouffer-profile-2D,cache=FALSE}
 bake(file="stouffer.rds",{
   
   grd <- expand.grid(
-    tau1=seq(0.1, 1.4, length=25),
-    tau2=seq(-0.1, 1.5, length=25),
-    theta=log(1)
+    tau1=seq(0.5, 1.2, length=25),
+    tau2=seq(0.5, 2.0, length=25),
+    theta=log(0.2),
+    phi=log(0.0001),
+    psi=log(5)
   )
-  
-  tic <- Sys.time()
   
   foreach(start=iter(grd,"row"),
           .errorhandling="pass",
           .inorder=FALSE,
-          .options.mpi=list(seed=95886868,chunkSize=1),
           .packages="bbmle"
   ) %dopar% try(
     {
       mle2(likfnStouffer,
-           method="Brent",
-           lower=-20,upper=20,
-           start=as.list(start[c("theta")]),
+           method="Nelder-Mead",
+           start=as.list(start[c("theta","phi","psi")]),
            fixed=as.list(start[c("tau1","tau2")]), 
-           control=list(trace=0,maxit=4000),
+           control=list(trace=0,maxit=10000),
            skip.hessian=TRUE) -> fit
       c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
     }
   ) -> results
-  
-  toc <- Sys.time()
-  print(toc-tic)
-  
+    
+  attr(results,"nproc") <- getDoParWorkers()
+
   results
 }) -> results
+```
+
+The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
+
+```{r stouffer-mle,purl=FALSE,cache=FALSE}
+bake("stouffer-mle.rds",{
+  
+  results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    subset(loglik==max(loglik),select=-c(loglik,conv)) -> start
+  
+  mle2(likfnStouffer,
+    method="Nelder-Mead",
+    start=as.list(start),
+    control=list(trace=0,maxit=10000),
+    skip.hessian=TRUE) -> fit
+  
+  c(coef(fit),loglik=as.numeric(logLik(fit)),
+    conv=fit@details$convergence) %>%
+    as.list() %>%
+    as.data.frame() -> mle
+}) -> mle.stouffer
 ```
 
 ```{r stouffer-results,purl=FALSE}
@@ -925,17 +928,16 @@ results %<>%
 
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
-             fill=ifelse(loglik>max(loglik,na.rm=TRUE)-2000,
-                         loglik,NA)))+
-    geom_tile(color=NA)+geom_contour(bins=100,color='white')+
-    labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
-
-results %>%
-    subset(loglik==max(loglik)) -> mle.stouffer
+    fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
+  geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+  geom_point(color='red',shape="x",size=3,data=mle.stouffer)+
+  geom_hline(color='red',size=0.2,linetype=2,data=mle.stouffer,aes(yintercept=tau2))+
+  geom_vline(color='red',size=0.2,linetype=2,data=mle.stouffer,aes(xintercept=tau1))+
+  labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
 ```{r stouffer-pairsplot,fig.height=6.83,purl=FALSE}
-pairs(~loglik+theta+tau1+tau2,
+pairs(~loglik+theta+phi+psi+tau1+tau2,
       data=results,
       subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
 ```
@@ -947,7 +949,7 @@ Let $S'(i,j)$ be the collection of towns closer to town $i$ than $j$ is.
 That is, $S'(i,j) = \{k: d(i,k) \le d(i,j)\}$.
 Note that $S'(i,j)$ includes $i$, whilst $S(i,j)$ does not. 
 
-$$\iota_i = \theta\,N_i^{\tau_1}\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S'(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}$$
+$$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S'(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}+\phi\right)$$
 
 
 ```{r rankmat1,cache=FALSE}
@@ -964,66 +966,71 @@ bake(file="rankmat1.rds",{
 ```
 
 ```{r stouffer1-like}
-likfnStouffer1 <- function (theta, tau1, tau2) {
+likfnStouffer1 <- function (theta, phi, tau1, tau2, psi) {
   theta <- exp(theta)
-  iota <- theta*(N^tau1)*((rr^tau2)%*%ylag)
+  phi <- exp(phi)
+  iota <- (N^tau1)*(theta*(rr^tau2)%*%ylag+phi)
   lambda <- betaS*iota[relevant]^alpha
-  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
 ```
 
-```{r stouffer1-test,purl=FALSE}
-par <- list(theta=0, tau1=0.5, tau2=0.5)
-with(par,likfnStouffer1(theta,tau1,tau2))
-
-bake(file="stouffer1-test.rds",{
-    tic <- Sys.time()
-    test <- mle2(likfnStouffer1,
-                 method="Nelder-Mead",
-                 start=par,
-                 control=list(trace=0,maxit=4000))
-    toc <- Sys.time()
-    toc-tic
-    test
-}) -> test
-
-summary(test)
-```
+The profile likelihood computation.
 
 ```{r stouffer1-profile-2D,cache=FALSE}
 bake(file="stouffer1.rds",{
   
   grd <- expand.grid(
-    tau1=seq(0.1, 1.4, length=25),
-    tau2=seq(-0.1, 1.5, length=25),
-    theta=log(1)
+    tau1=seq(0.5, 1.2, length=25),
+    tau2=seq(0.5, 2.0, length=25),
+    theta=log(0.2),
+    phi=log(0.0001),
+    psi=log(5)
   )
-  
-  tic <- Sys.time()
   
   foreach(start=iter(grd,"row"),
           .errorhandling="pass",
           .inorder=FALSE,
-          .options.mpi=list(seed=95886868,chunkSize=1),
           .packages="bbmle"
   ) %dopar% try(
     {
       mle2(likfnStouffer1,
-           method="Brent",
-           lower=-20,upper=20,
-           start=as.list(start[c("theta")]),
+           method="Nelder-Mead",
+           start=as.list(start[c("theta","phi","psi")]),
            fixed=as.list(start[c("tau1","tau2")]), 
-           control=list(trace=0,maxit=4000),
+           control=list(trace=0,maxit=10000),
            skip.hessian=TRUE) -> fit
       c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
     }
   ) -> results
-  
-  toc <- Sys.time()
-  print(toc-tic)
-  
+    
+  attr(results,"nproc") <- getDoParWorkers()
+
   results
 }) -> results
+```
+
+The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
+
+```{r stouffer1-mle,purl=FALSE,cache=FALSE}
+bake("stouffer1-mle.rds",{
+  
+  results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    subset(loglik==max(loglik),select=-c(loglik,conv)) -> start
+  
+  mle2(likfnStouffer1,
+    method="Nelder-Mead",
+    start=as.list(start),
+    control=list(trace=0,maxit=10000),
+    skip.hessian=TRUE) -> fit
+  
+  c(coef(fit),loglik=as.numeric(logLik(fit)),
+    conv=fit@details$convergence) %>%
+    as.list() %>%
+    as.data.frame() -> mle
+}) -> mle.stouffer1
 ```
 
 ```{r stouffer1-results,purl=FALSE}
@@ -1039,17 +1046,16 @@ results %<>%
 
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
-             fill=ifelse(loglik>max(loglik,na.rm=TRUE)-2000,
-                         loglik,NA)))+
-    geom_tile(color=NA)+geom_contour(bins=100,color='white')+
-    labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
-
-results %>%
-    subset(loglik==max(loglik)) -> mle.stouffer1
+    fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
+  geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+  geom_point(color='red',shape="x",size=3,data=mle.stouffer1)+
+  geom_hline(color='red',size=0.2,linetype=2,data=mle.stouffer1,aes(yintercept=tau2))+
+  geom_vline(color='red',size=0.2,linetype=2,data=mle.stouffer1,aes(xintercept=tau1))+
+  labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
 ```{r stouffer1-pairsplot,fig.height=6.83,purl=FALSE}
-pairs(~loglik+theta+tau1+tau2,
+pairs(~loglik+theta+phi+psi+tau1+tau2,
       data=results,
       subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
 ```
@@ -1172,7 +1178,9 @@ list(gravity=mle.grav,
   ldply(.id="model") %>%
   arrange(-loglik) %>%
   mutate(rho=exp(rho),psi=exp(psi)) %>%
-  rename(c(theta="log theta",phi="log phi")) %>%
+  rename(c(theta="$\\log{\\theta}$",phi="$\\log{\\phi}$",rho="$\\rho$",
+    psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
+    loglik="$\\ell$")) %>%
   kable(digits=3)
 ```
 
