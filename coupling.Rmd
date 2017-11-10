@@ -1080,34 +1080,27 @@ bake(file="radmat.rds",{
 ```
 
 ```{r radiation-like}
-likfnRadiation <- function (theta) {
+likfnRadiation <- function (theta, psi) {
   theta <- exp(theta)
   iota <- theta*(rr%*%ylag)
   lambda <- betaS*iota[relevant]^alpha
-  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
 ```
 
-```{r radiation-fit,purl=FALSE}
-par <- list(theta=0)
-with(par,likfnRadiation(theta))
-
-bake(file="radiation.rds",{
+```{r radiation-mle,cache=FALSE,purl=FALSE}
+bake(file="radiation-mle.rds",{
   mle2(likfnRadiation,
-       method="Brent",
-       lower=-20,upper=20,
-       start=par,
-       control=list(trace=0,maxit=4000))
+    method="Nelder-Mead",
+    start=list(theta=log(1),psi=log(5)),
+    control=list(trace=0,maxit=10000),
+    skip.hessian=FALSE)
 }) -> fit
-
-summary(fit)
-
-with(as.list(coef(fit)),c(exp(c(theta=theta))))
-
-exp(confint(fit))
 ```
 
-```{r radiation-results,purl=FALSE,include=FALSE}
+```{r radiation-results,purl=FALSE}
+summary(fit)
+logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
   as.list() %>% as.data.frame() -> mle.radiation
 ```
@@ -1131,34 +1124,27 @@ bake(file="radmat1.rds",{
 ```
 
 ```{r radiation1-like}
-likfnRadiation1 <- function (theta) {
+likfnRadiation1 <- function (theta, psi) {
   theta <- exp(theta)
   iota <- theta*(rr%*%ylag)
   lambda <- betaS*iota[relevant]^alpha
-  -sum(dpois(x=obs,lambda=lambda,log=TRUE))
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
 ```
 
-```{r radiation1-fit,purl=FALSE}
-par <- list(theta=0)
-with(par,likfnRadiation1(theta))
-
-bake(file="radiation1.rds",{
+```{r radiation1-mle,cache=FALSE,purl=FALSE}
+bake(file="radiation1-mle.rds",{
   mle2(likfnRadiation1,
-       method="Brent",
-       lower=-20,upper=20,
-       start=par,
-       control=list(trace=0,maxit=4000))
+    method="Nelder-Mead",
+    start=list(theta=log(1),psi=log(5)),
+    control=list(trace=0,maxit=10000),
+    skip.hessian=FALSE)
 }) -> fit
-
-summary(fit)
-
-with(as.list(coef(fit)),c(exp(c(theta=theta))))
-
-exp(confint(fit))
 ```
 
-```{r radiation1-results,purl=FALSE,include=FALSE}
+```{r radiation1-results,purl=FALSE}
+summary(fit)
+logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
   as.list() %>% as.data.frame() -> mle.radiation1
 ```
