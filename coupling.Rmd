@@ -1061,10 +1061,11 @@ list(gravity=mle.grav,
      radiation.variant=mle.radiation1) %>%
   ldply(.id="model") %>%
   arrange(-loglik) %>%
-  mutate(rho=exp(rho),psi=exp(psi)) %>%
+  mutate(rho=exp(rho),psi=exp(psi),delta.loglik=loglik-max(loglik)) %>%
+  subset(select=c(model,loglik,delta.loglik,theta,phi,rho,tau1,tau2,delta,psi)) %>%
   rename(c(theta="$\\log{\\theta}$",phi="$\\log{\\phi}$",rho="$\\rho$",
     psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
-    loglik="$\\ell$")) %>%
+    loglik="$\\ell$",delta.loglik="$\\Delta\\!\\ell$")) %>%
   kable(digits=3)
 ```
 
