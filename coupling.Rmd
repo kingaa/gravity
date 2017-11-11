@@ -3,7 +3,7 @@ title: "Spatial coupling in measles via fade-out survival analysis"
 csl: ecology.csl
 output:
   html_document:
-    code_folding: hide
+    code_folding: show
     df_print: kable
     highlight: tango
     dev: png
@@ -33,11 +33,12 @@ Produced with **R** version `r getRversion()`.
 
 --------------------------
 
-```{r knitr-opts,include=FALSE,purl=FALSE,cache=FALSE}
+```{r knitr-opts,include=FALSE,cache=FALSE}
 library(knitr)
 prefix <- "coupling"
 opts_chunk$set(
   eval=TRUE,
+  purl=FALSE,
   progress=TRUE,
   prompt=FALSE,tidy=FALSE,highlight=TRUE,
   strip.white=TRUE,
@@ -60,6 +61,8 @@ opts_chunk$set(
   dev='png',
   dev.args=list(bg='transparent')
   )
+read_chunk("tsir.R")
+read_chunk("modelfits.R")
 ```
 
 # Preparations
@@ -69,10 +72,7 @@ options(
   keep.source=TRUE,
   stringsAsFactors=FALSE,
   knitr.kable.NA="",
-  encoding="UTF-8",
-  aakmisc.dbname="ewmeasles",
-  aakmisc.remotehost="kinglab.eeb.lsa.umich.edu",
-  aakmisc.user="gravity")
+  encoding="UTF-8")
 
 set.seed(594709947L)
 
@@ -86,44 +86,15 @@ library(bbmle)
 library(pomp)
 library(ggplot2)
 theme_set(theme_bw())
-
-mpi <- !is.na(as.integer(Sys.getenv("OMPI_COMM_WORLD_SIZE")))
-if (mpi) {
-    library(doMPI)
-    cl <- startMPIcluster(bcast=FALSE)
-    registerDoMPI(cl)
-} else {
-    library(doMC)
-    registerDoMC()
-}
+library(doMC)
+registerDoMC()
 ```
 
 ## Preprocess the data.
 
 Retrieve the data from the database.
 
-```{r clean-data,purl=FALSE,cache=FALSE}
-bake(file="ew_measles_data.rds",{
-  library(aakmisc)
-  
-  startTunnel()
-  
-  getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
-
-  getQuery("select town,date,cases from measles where year>=1944 order by town,date") %>%
-    mutate(year=as.integer(format(date+3,"%Y"))) %>%
-    ddply(~town+year,mutate,week=seq_along(year),biweek=(week+1)%/%2) %>%
-    subset(week<=52,select=-c(date,week)) %>%
-    acast(town~year~biweek,value.var="cases",fun.aggregate=sum) %>%
-    melt(varnames=c("town","year","biweek"),value.name="cases") %>%
-    mutate(town=as.character(town)) %>%
-    arrange(town,year,biweek) %>%
-    join(demog,by=c("town","year")) %>%
-    mutate(births=births/26) -> measles
-  
-  stopTunnel()
-  measles
-}) -> dat
+```{r clean-data,eval=FALSE}
 ```
 
 In the above:
@@ -137,26 +108,7 @@ In the above:
 
 Now let's compute the distances between the cities.
 
-```{r distances,cache=FALSE}
-bake(file="distances.rds",{
-  library(aakmisc)
-  
-  startTunnel()
-  getQuery("select * from coords") %>% arrange(town) -> coords
-  stopTunnel()
-  rownames(coords) <- coords$town
-  
-  library(ncf)
-   
-  ## compute distance matrix
-  expand.grid(i=coords$town,j=coords$town) %>%
-    ddply(~i,mutate,
-          dist=mapply(gcdist,x1=coords[i,"long"],y1=coords[i,"lat"],
-                      x2=coords[j,"long"],y2=coords[j,"lat"]),
-          .parallel=TRUE) %>% 
-    # mutate(dist=mapply(dist,i,j)) %>% 
-    acast(i~j,value.var="dist")
-}) -> distances
+```{r distances,eval=FALSE}
 ```
 
 ## Apply TSIR model to the individual towns.
@@ -168,30 +120,12 @@ Correct for under-reporting: `I = cases/ur`.
 
 Regress cumulative cases on cumulative births to estimate under-reporting (ur) and susceptible depletion (`z`) `I` is estimated as `cases/ur`.
 
-```{r under-reporting,purl=FALSE}
-estUR <- function (dat, df = 2.5) {
-  cumbirths <- cumsum(dat$births)
-  cumcases <- cumsum(dat$cases)
-  fit <- smooth.spline(cumbirths,cumcases,df=df)
-  mutate(dat,
-         ur=predict(fit,x=cumbirths,deriv=1)$y,
-         I=cases/ur)
-}
-
-dat %>% ddply(~town,estUR,.parallel=TRUE) -> dat
+```{r under-reporting,eval=FALSE}
 ```
 
 Now reconstruct the susceptibles (via the residuals `z`).
 
-```{r susceptible-reconstruction,purl=FALSE}
-suscRecon <- function (dat, df = 2.5) {
-  cumbirths <- cumsum(dat$births)
-  cuminc <- cumsum(dat$I)
-  fit <- smooth.spline(cumbirths,cuminc,df=df)
-  mutate(dat,z=-residuals(fit))
-}
-
-dat %>% ddply(~town,suscRecon,.parallel=TRUE) -> dat
+```{r susceptible-reconstruction,eval=FALSE}
 ```
 
 *Does the preceding scale the z variable appropriately?*
@@ -203,68 +137,22 @@ First, set up the data matrix for the regression.
 This involves lagging the I and z variables.
 Population size is assumed constant at its median value.
 
-```{r make-data-matrix,purl=FALSE}
-dat %>%
-  ddply(~town,mutate,
-        Ilag=c(NA,head(I,-1)),
-        zlag=c(NA,head(z,-1)),
-        Ps=median(pop),
-        seas=factor(biweek,levels=1:26)) %>%
-  ddply(~town,tail,-1) -> dat
+```{r make-data-matrix,eval=FALSE}
 ```
 
 We'll start by estimating the mean susceptible fraction, assuming a single global value for this parameter.
 Some towns have very high changes in susceptible fraction; exclude these.
 
-```{r exclude-weird-towns,purl=FALSE}
-dat %>%
-  ddply(~town,summarize,
-        maxfrac=max(-z/Ps)) %>%
-  subset(maxfrac>0.03) %>%
-  extract2("town") -> excludes
-
-print(length(excludes))
+```{r exclude-weird-towns,eval=FALSE}
 ```
 
 Now profile on the fraction, $\sigma$, of susceptibles in the population.
 This assumes a single, global value of $\sigma$.
 **NOTE: the $\beta$ are here scaled by population size.**
 
-```{r sigma-profile,purl=FALSE,cache=FALSE}
-stew("sigma-profile.rda",{
-    
-    dat %>% subset(!(town%in%excludes)) -> dat1
-    
-    sigma1dev <- function (dat, sigma) {
-        slag <- with(dat,sigma*Ps+zlag)
-        fit <- glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(log(slag)),
-                   data=dat,subset=Ilag>0&I>0)
-        fit$deviance
-    }
-    
-    foreach (sigma=seq(0.03,0.25,length=100),
-             .combine=rbind,.inorder=FALSE) %dopar%
-        {
-            dat1 %>% 
-                daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>% 
-                sum() -> dev
-            data.frame(sigma=sigma,dev=dev)
-        } -> sigmaProf
-    
-    fit <- optim(par=0.037,lower=0.03,upper=0.10,
-                 method="Brent",hessian=TRUE,
-                 fn=function (sigma) {
-                     dat1 %>% 
-                         daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>% 
-                         sum()
-                 })
-    fit$par -> sigmaBar
-
-    rm(dat1)
-
-    dat %>% mutate(Slag=sigmaBar*Ps+zlag) -> dat
-})
-
+```{r sigma-profile}
+```
+```{r sigma-profile-plot}
 sigmaProf %>%
     ggplot(aes(x=sigma,y=dev))+geom_line()
 ```
@@ -272,52 +160,12 @@ sigmaProf %>%
 Our global sigma estimate is $\sigma=`r signif(sigmaBar,3)`$.
 Now, we assume this value of $\sigma$ and fit TSIR to each of the towns individually using linear regression.
 
-```{r fit-tsir,cache=FALSE}
-bake(file="tsir-fits.rds",{
-  coefnames <- c(sprintf("seas%d",1:26),"log(Ilag)","I(1/Ilag)")
-  newcoefnames <- c(sprintf("log.beta%02d",1:26),"alpha","m.alpha")
-  
-  tsirfit <- function (dat) {
-    glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(log(Slag)),
-        data=dat,subset=Ilag>0&I>0) %>% summary() %>% 
-      extract2("coefficients") -> fit
-    fit[,"Estimate"] %>% extract(coefnames) %>% as.list() %>% as.data.frame() %>%
-      set_names(newcoefnames) -> coefs
-    fit[,"Std. Error"] %>% extract(coefnames) %>% as.list() %>% as.data.frame() %>%
-      set_names(paste(newcoefnames,"se",sep=".")) -> se
-    cbind(coefs,se,sigma=sigmaBar,
-          town=unique(dat$town),Ps=unique(dat$Ps))
-  }
-  
-  dat %>% ddply(~town,tsirfit,.parallel=TRUE) %>% 
-    melt(id=c("town","Ps")) %>% 
-    mutate(se=ifelse(grepl("\\.se$",variable),"se","est"),
-           variable=sub("\\.se$","",variable)) %>%
-    dcast(town+Ps+variable~se) -> tsirs
-  
-  dat %>% ddply(~town,summarize,Ps=unique(Ps)) -> tsircoef
-  
-  tsirs %>% 
-    na.omit() %>%
-    ddply(~variable, function (d) {
-      fit <- lm(est~log(Ps),data=d,weights=1/se^2) 
-      data.frame(town=tsircoef$town,value=predict(fit,newdata=tsircoef))
-    },.parallel=TRUE) %>% 
-    dcast(town~variable) %>% 
-    melt(id=c("town","alpha","m.alpha"),value.name="log.beta") %>%
-    mutate(biweek=as.integer(sub("log.beta","",as.character(variable)))) %>%
-    arrange(town,biweek) %>%
-    subset(select=-variable) -> tsircoef
-  
-  dat %>%
-    join(tsircoef,by=c("town","biweek")) %>%
-    mutate(ylag=Ilag/Ps) -> dat
-}) -> dat
+```{r fit-tsir}
 ```
 
 Just for interest, let's plot $R_0$ as a function of city size.
 
-```{r R0-plot,purl=FALSE}
+```{r R0-plot}
 library(scales)
 dat %>% ddply(~town,summarize,N=mean(Ps),
               beta=exp(mean(log.beta)),R0=beta*N) %>%
@@ -354,30 +202,6 @@ These are the ones for which the preceding week saw zero cases.
 
 
 ```{r gravity-pre}
-dat %>% acast(town~year+biweek,value.var="ylag") -> ylag
-dat %>% acast(town~year+biweek,value.var="Slag") -> slag
-dat %>% acast(town~year+biweek,value.var="log.beta") %>% exp() -> beta
-dat %>% acast(town~year+biweek,value.var="cases") -> obs
-dat %>% daply(~town,function(x)unique(x$Ps)) -> N
-
-dd <- 1/distances
-diag(dd) <- 0
-
-stopifnot(identical(rownames(ylag),rownames(slag)))
-stopifnot(identical(rownames(ylag),rownames(beta)))
-stopifnot(identical(rownames(ylag),rownames(obs)))
-stopifnot(identical(rownames(ylag),names(N)))
-stopifnot(identical(rownames(ylag),rownames(dd)))
-stopifnot(identical(rownames(ylag),colnames(dd)))
-      
-ddscal <- exp(mean(log(dd[lower.tri(dd)])))
-dd <- dd/ddscal
-
-alpha <- mean(dat$alpha)
-
-relevant <- which(ylag==0&slag>=0)
-obs <- obs[relevant]
-betaS <- beta[relevant]*slag[relevant]
 ```
 
 # The gravity model
@@ -397,58 +221,17 @@ $$\mathrm{diag}(A)\,B=A\;*\;B.$$
 
 The negative log likelihood function for the gravity model is:
 ```{r gravity-like}
-likfnGravity <- function (theta, phi, rho, psi, tau1, tau2) {
-  theta <- exp(theta)
-  phi <- exp(phi)
-  rho <- exp(rho)
-  Q <- (N^tau2)*(dd^rho)
-  iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
-}
 ```
 
 Now we'll do a likelihood profile over $\tau_1$ and $\tau_2$.
 
 ```{r gravity-profile-2D,cache=FALSE}
-bake(file="gravity.rds",{
-  
-  grd <- expand.grid(
-    tau1=seq(0.1, 1.4, length=25),
-    tau2=seq(-1, 1, length=25),
-    rho=log(1.0),
-    psi=log(5),
-    theta=log(0.0001),
-    phi=log(0.0001)
-  )
-  
-  foreach(start=iter(grd,"row"),
-          .errorhandling="pass",
-          .inorder=FALSE,
-          .packages="bbmle"
-  ) %dopar% try(
-    {
-      mle2(likfnGravity,
-        method="Nelder-Mead",
-        start=as.list(start[c("rho","theta","phi","psi")]),
-        fixed=as.list(start[c("tau1","tau2")]), 
-        control=list(trace=0,maxit=10000),
-        skip.hessian=TRUE) -> fit
-      
-      c(coef(fit),loglik=as.numeric(logLik(fit)),
-        conv=fit@details$convergence)
-    }
-  ) -> results
-
-  attr(results,"nproc") <- getDoParWorkers()
-  results
-}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster.
 Now we refine to obtain the global MLE.
 
-```{r gravity-mle,purl=FALSE,cache=FALSE}
+```{r gravity-mle,cache=FALSE}
 bake("gravity-mle.rds",{
   
   results %>%
@@ -469,7 +252,7 @@ bake("gravity-mle.rds",{
 }) -> mle.grav
 ```
 
-```{r gravity-results,purl=FALSE}
+```{r gravity-results}
 results %>%
     extract(sapply(results,inherits,"try-error")) %>%
     sapply(as.character) %>%
@@ -489,7 +272,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r gravity-pairsplot,fig.height=6.83,purl=FALSE}
+```{r gravity-pairsplot,fig.height=6.83}
 pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
       data=results,
       subset=loglik>max(loglik)-10000,cex=0.5)
@@ -509,57 +292,16 @@ $$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y^{\tau_2}+\phi\,N^{\tau_1}.$$
 The negative log likelihood function for the @xia2004measles model is:
 
 ```{r xia-like}
-likfnXia <- function (theta, phi, rho, psi, tau1, tau2) {
-  theta <- exp(theta)
-  phi <- exp(phi)
-  rho <- exp(rho)
-  Q <- (N^tau2)*(dd^rho)
-  iota <- (N^tau1)*(theta*crossprod(Q,ylag^tau2)+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
-}
 ```
 
 Again, a profile computation.
 
 ```{r xia-profile-2D,cache=FALSE}
-bake(file="xia.rds",{
-  
-  grd <- expand.grid(
-    tau1=seq(0.1, 1.5, length=25), 
-    tau2=seq(0.1, 1.0, length=25),
-    psi=log(5),
-    rho=log(1.0),
-    theta=log(1e-6),
-    phi=log(1e-6)
-  )
-  
-  foreach(start=iter(grd,"row"),
-          .errorhandling="pass",
-          .inorder=FALSE,
-          .packages="bbmle"
-  ) %dopar% try(
-    {
-      mle2(likfnXia,
-           method="Nelder-Mead",
-           start=as.list(start[c("rho","theta","psi","phi")]),
-           fixed=as.list(start[c("tau1","tau2")]), 
-           control=list(trace=0,maxit=10000),
-           skip.hessian=TRUE) -> fit
-      c(coef(fit),loglik=as.numeric(logLik(fit)),
-        conv=fit@details$convergence)
-    }
-  ) -> results
-  
-  attr(results,"nproc") <- getDoParWorkers()
-  
-  results
-}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
 
-```{r xia-mle,purl=FALSE,cache=FALSE}
+```{r xia-mle,cache=FALSE}
 bake("xia-mle.rds",{
   results %>%
     extract(!sapply(results,inherits,"try-error")) %>%
@@ -579,7 +321,7 @@ bake("xia-mle.rds",{
 }) -> mle.xia
 ```
 
-```{r xia-results,purl=FALSE}
+```{r xia-results}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -599,7 +341,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r xia-pairsplot,fig.height=6.83,purl=FALSE}
+```{r xia-pairsplot,fig.height=6.83}
 pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
       data=results,
       subset=loglik>max(loglik)-10000,cex=0.5)
@@ -621,60 +363,16 @@ $$\iota_i=N_i^{\tau_1}\,\left(\theta\,\sum_j Q_{ji}\,R_{ji}^\delta\,y_{j}+\phi\r
 The negative log likelihood function for the competing destinations model is:
 
 ```{r compdest-like}
-iii <- 1-diag(length(N))
-
-likfnCompDest <- function (theta, phi, rho, psi, tau1, tau2, delta) {
-  theta <- exp(theta)
-  phi <- exp(phi)
-  rho <- exp(rho)
-  Q <- (N^tau2)*(dd^rho)
-  R <- crossprod(Q,iii)^delta
-  iota <- (N^tau1)*(theta*crossprod(Q*R,ylag)+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
-}
 ```
 
 We compute the profile likelihood as before.
 
 ```{r compdest-profile-2D,cache=FALSE}
-bake(file="compdest.rds",{
-  
-  grd <- expand.grid(
-    tau1=seq(0.1, 1.4, length=25),
-    tau2=seq(-1, 1, length=25),
-    rho=log(0.6),
-    theta=log(1),
-    phi=log(0.001),
-    psi=log(2),
-    delta=-1
-  )
-
-  foreach(start=iter(grd,"row"),
-          .errorhandling="pass",
-          .inorder=FALSE,
-          .packages="bbmle"
-  ) %dopar% try(
-    {
-      mle2(likfnCompDest,
-           method="Nelder-Mead",
-           start=as.list(start[c("rho","theta","delta","psi","phi")]),
-           fixed=as.list(start[c("tau1","tau2")]), 
-           control=list(trace=0,maxit=10000),
-           skip.hessian=TRUE) -> fit
-      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
-    }
-  ) -> results
-  
-  attr(results,"nproc") <- getDoParWorkers()
-  
-  results
-}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
 
-```{r compdest-mle,purl=FALSE,cache=FALSE}
+```{r compdest-mle,cache=FALSE}
 bake("compdest-mle.rds",{
   
   results %>%
@@ -696,7 +394,7 @@ bake("compdest-mle.rds",{
 ```
 
 
-```{r compdest-results,purl=FALSE}
+```{r compdest-results}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -716,7 +414,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r compdest-pairsplot,fig.height=6.83,purl=FALSE}
+```{r compdest-pairsplot,fig.height=6.83}
 pairs(~loglik+theta+phi+rho+delta+psi+tau1+tau2,
       data=results,
       subset=loglik>max(loglik)-10000,cex=0.5)
@@ -732,68 +430,21 @@ $$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S(i,
 
 
 ```{r rankmat,cache=FALSE}
-bake(file="rankmat.rds",{
-  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
-  for (i in seq_along(N)) {
-    for (j in seq_along(N)) {
-      rr[i,j] <- N[j]/(sum(N[distances[i,]<=distances[i,j]])-N[i])
-    }
-  }
-  diag(rr) <- 0
-  rr
-}) -> rr
 ```
 
 The negative log likelihood function for the @xia2004measles model is:
 
 ```{r stouffer-like}
-likfnStouffer <- function (theta, phi, tau1, tau2, psi) {
-  theta <- exp(theta)
-  phi <- exp(phi)
-  iota <- (N^tau1)*(theta*((rr^tau2)%*%ylag)+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
-}
 ```
 
 We compute the profile likelihood as before.
 
 ```{r stouffer-profile-2D,cache=FALSE}
-bake(file="stouffer.rds",{
-  
-  grd <- expand.grid(
-    tau1=seq(0.5, 1.2, length=25),
-    tau2=seq(0.5, 2.0, length=25),
-    theta=log(0.2),
-    phi=log(0.0001),
-    psi=log(5)
-  )
-  
-  foreach(start=iter(grd,"row"),
-          .errorhandling="pass",
-          .inorder=FALSE,
-          .packages="bbmle"
-  ) %dopar% try(
-    {
-      mle2(likfnStouffer,
-           method="Nelder-Mead",
-           start=as.list(start[c("theta","phi","psi")]),
-           fixed=as.list(start[c("tau1","tau2")]), 
-           control=list(trace=0,maxit=10000),
-           skip.hessian=TRUE) -> fit
-      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
-    }
-  ) -> results
-    
-  attr(results,"nproc") <- getDoParWorkers()
-
-  results
-}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
 
-```{r stouffer-mle,purl=FALSE,cache=FALSE}
+```{r stouffer-mle,cache=FALSE}
 bake("stouffer-mle.rds",{
   
   results %>%
@@ -814,7 +465,7 @@ bake("stouffer-mle.rds",{
 }) -> mle.stouffer
 ```
 
-```{r stouffer-results,purl=FALSE}
+```{r stouffer-results}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -835,7 +486,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r stouffer-pairsplot,fig.height=6.83,purl=FALSE}
+```{r stouffer-pairsplot,fig.height=6.83}
 pairs(~loglik+theta+phi+psi+tau1+tau2,
       data=results,
       subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
@@ -852,66 +503,19 @@ $$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S'(i
 
 
 ```{r rankmat1,cache=FALSE}
-bake(file="rankmat1.rds",{
-  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
-  for (i in seq_along(N)) {
-    for (j in seq_along(N)) {
-      rr[i,j] <- N[j]/sum(N[distances[i,]<=distances[i,j]])
-    }
-  }
-  diag(rr) <- 0
-  rr
-}) -> rr
 ```
 
 ```{r stouffer1-like}
-likfnStouffer1 <- function (theta, phi, tau1, tau2, psi) {
-  theta <- exp(theta)
-  phi <- exp(phi)
-  iota <- (N^tau1)*(theta*(rr^tau2)%*%ylag+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
-}
 ```
 
 The profile likelihood computation.
 
 ```{r stouffer1-profile-2D,cache=FALSE}
-bake(file="stouffer1.rds",{
-  
-  grd <- expand.grid(
-    tau1=seq(0.5, 1.2, length=25),
-    tau2=seq(0.5, 2.0, length=25),
-    theta=log(0.2),
-    phi=log(0.0001),
-    psi=log(5)
-  )
-  
-  foreach(start=iter(grd,"row"),
-          .errorhandling="pass",
-          .inorder=FALSE,
-          .packages="bbmle"
-  ) %dopar% try(
-    {
-      mle2(likfnStouffer1,
-           method="Nelder-Mead",
-           start=as.list(start[c("theta","phi","psi")]),
-           fixed=as.list(start[c("tau1","tau2")]), 
-           control=list(trace=0,maxit=10000),
-           skip.hessian=TRUE) -> fit
-      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
-    }
-  ) -> results
-    
-  attr(results,"nproc") <- getDoParWorkers()
-
-  results
-}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
 
-```{r stouffer1-mle,purl=FALSE,cache=FALSE}
+```{r stouffer1-mle,cache=FALSE}
 bake("stouffer1-mle.rds",{
   
   results %>%
@@ -932,7 +536,7 @@ bake("stouffer1-mle.rds",{
 }) -> mle.stouffer1
 ```
 
-```{r stouffer1-results,purl=FALSE}
+```{r stouffer1-results}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -953,7 +557,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r stouffer1-pairsplot,fig.height=6.83,purl=FALSE}
+```{r stouffer1-pairsplot,fig.height=6.83}
 pairs(~loglik+theta+phi+psi+tau1+tau2,
       data=results,
       subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
@@ -965,17 +569,6 @@ pairs(~loglik+theta+phi+psi+tau1+tau2,
 $$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
 
 ```{r radmat,cache=FALSE}
-bake(file="radmat.rds",{
-  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
-  for (i in seq_along(N)) {
-    for (j in seq_along(N)) {
-      s <- sum(N[distances[i,]<=distances[i,j]])
-      rr[i,j] <- N[i]*N[j]*N[j]/s/(s-N[i])
-    }
-  }
-  diag(rr) <- 0
-  rr
-}) -> rr
 ```
 
 ```{r radiation-like}
@@ -987,7 +580,7 @@ likfnRadiation <- function (theta, psi) {
 }
 ```
 
-```{r radiation-mle,cache=FALSE,purl=FALSE}
+```{r radiation-mle,cache=FALSE}
 bake(file="radiation-mle.rds",{
   mle2(likfnRadiation,
     method="Nelder-Mead",
@@ -997,7 +590,7 @@ bake(file="radiation-mle.rds",{
 }) -> fit
 ```
 
-```{r radiation-results,purl=FALSE}
+```{r radiation-results}
 summary(fit)
 logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
@@ -1009,17 +602,6 @@ c(coef(fit),loglik=logLik(fit)) %>%
 $$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}$$
 
 ```{r radmat1,cache=FALSE}
-bake(file="radmat1.rds",{
-  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
-  for (i in seq_along(N)) {
-    for (j in seq_along(N)) {
-      s <- sum(N[distances[i,]<=distances[i,j]])
-      rr[i,j] <- N[i]*N[j]*N[j]/(s+N[i])/(s)
-    }
-  }
-  diag(rr) <- 0
-  rr
-}) -> rr
 ```
 
 ```{r radiation1-like}
@@ -1031,7 +613,7 @@ likfnRadiation1 <- function (theta, psi) {
 }
 ```
 
-```{r radiation1-mle,cache=FALSE,purl=FALSE}
+```{r radiation1-mle,cache=FALSE}
 bake(file="radiation1-mle.rds",{
   mle2(likfnRadiation1,
     method="Nelder-Mead",
@@ -1041,7 +623,7 @@ bake(file="radiation1-mle.rds",{
 }) -> fit
 ```
 
-```{r radiation1-results,purl=FALSE}
+```{r radiation1-results}
 summary(fit)
 logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
@@ -1051,7 +633,7 @@ c(coef(fit),loglik=logLik(fit)) %>%
 
 # Model comparison
 
-```{r modelcomp,cache=FALSE,echo=FALSE,purl=FALSE}
+```{r modelcomp,cache=FALSE,echo=FALSE}
 list(gravity=mle.grav,
      xia=mle.xia,
      comp.dest=mle.compdest,
@@ -1081,7 +663,7 @@ plot(ext[,2]~N)
 
 We can predict importation rates from fitted models
 
-```{r iota-plot,fig.height=6.83,purl=FALSE,eval=FALSE}
+```{r iota-plot,fig.height=6.83,eval=FALSE}
 #Gravity
 readRDS("gravity-mle.rds") -> test
 
@@ -1269,7 +851,7 @@ legend("topleft",
 ```
 
 We next create the fade-out plot
-```{r fadeout-plot,fig.height=6.83,purl=FALSE}
+```{r fadeout-plot,fig.height=6.83}
 dat$E=dat$cases==0 
 dat %>% ddply(~town,summarize,mean(E)) -> ext
 
@@ -1288,14 +870,14 @@ legend("topright",
         col=c("black", "red"))
 ```
 And do spatial plot of residuals 
-```{r residual-plot,fig.height=6.83,purl=FALSE,eval=F}
+```{r residual-plot,fig.height=6.83,eval=F}
 library(ncf)
 dfr=data.frame(lon=latlon$Long, lat=latlon$Lat, gr=iotagr, cd=iotacd, res=iotagr-iotacd)
 spatial.plot(dfr$lon, dfr$lat, edat$resE, inches=.1)
 title("excess fade-out")
 ```
 Then generate deviations ffrom expectation based on size for all of the spatial models.
-```{r expect-spatial,purl=FALSE,eval=F}
+```{r expect-spatial,eval=F}
 edat=data.frame(N=N, E=ext, logitE=log(ext[,2]/(1-ext[,2])), 
 gr=iotagr,
 xi=iotaxi,
@@ -1310,7 +892,7 @@ vr=iotavr
 
 And create residuals of all against log(N)
 
-```{r residuals,purl=FALSE,eval=F}
+```{r residuals,eval=F}
 edat$logitE[edat$logitE==-Inf]=NA
 edat$resE=NA
 edat$resE[!is.na(edat$logitE)]=resid(lm(logitE~I(log(N)), data=edat, na.action=na.omit))
@@ -1324,12 +906,12 @@ edat%<>%mutate(resRA=resid(lm(log(ra)~I(log(N)))))
 edat%<>%mutate(resVR=resid(lm(log(vr)~I(log(N)))))
 ```
 The correlation among residuals
-```{r cormat,purl=FALSE,eval=F}
+```{r cormat,eval=F}
 round(cor(edat[,13:21], use="pairwise.complete"), 3)
 ```
 Clearly the Comp-Dest versions are best.
 
-```{r corr plot,purl=FALSE,eval=F}
+```{r corr plot,eval=F}
 cc=matrix(NA, ncol=3, nrow=8)
 for(i in 1:8){
   cc[i,]=cor.test(-edat[,13], edat[,13+i])$estimate
@@ -1344,13 +926,13 @@ plotCI(cc[,1], ui=cc[,3], li=cc[,2], ylab="cor", xlab="")
 axis(1, at=1:8, labels=c("GR", "XI", "CD", "xC", "ST", "SV", "RA", "RV"))
 ```
 Plot of difference between Xia and xCD
-```{r difference plot,purl=FALSE,eval=F}
+```{r difference plot,eval=F}
 spatial.plot(dfr$lon, dfr$lat, log(edat$wc)-log(edat$xi), inches=.1)
 title("xCD vs Xia difference")
 ```
 It may also be of interest to take a clustering approach to comparing model predictions...
 
-```{r k-means-dendro,purl=FALSE,eval=F}
+```{r k-means-dendro,eval=F}
 hc = hclust(dist(t(edat[,14:21])))
 plot(hc)
 ```
@@ -1376,14 +958,5 @@ Plots:
 1. Revisit $\sigma$ profile
 1. Revisit TSIR fitting (include residuals?)
 1. Include references for the various models.
-
-```{r stop-mpi,include=FALSE}
-if (mpi) {
-    closeCluster(cl)
-    try(detach("package:doMPI",unload=TRUE),silent=TRUE)
-    mpi.exit()
-    try(detach("package:Rmpi",unload=TRUE),silent=TRUE)
-}
-```
 
 # References
