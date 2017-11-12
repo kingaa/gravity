@@ -1,3 +1,17 @@
+Loading required package: methods
+Loading required package: parallel
+Loading required package: ggplot2
+Loading required package: scales
+Loading required package: grid
+Loading required package: readr
+
+Attaching package: ‘readr’
+
+The following object is masked from ‘package:scales’:
+
+    col_factor
+
+setting ‘stringsAsFactors=FALSE’
 [1] 233
 R version 3.4.2 (2017-09-28)
 Platform: x86_64-pc-linux-gnu (64-bit)
@@ -27,8 +41,8 @@ other attached packages:
 loaded via a namespace (and not attached):
  [1] Rcpp_0.12.13      hms_0.3           munsell_0.4.3     colorspace_1.3-2 
  [5] lattice_0.20-35   R6_2.2.2          rlang_0.1.4       subplex_1.5-1    
- [9] stringr_1.2.0     tools_3.4.2       packrat_0.4.8-1   gtable_0.2.0     
-[13] DBI_0.7           coda_0.19-1       RPostgreSQL_0.6-2 lazyeval_0.2.1   
-[17] digest_0.6.12     tibble_1.3.4      nloptr_1.0.4      codetools_0.2-15 
-[21] curl_3.0          deSolve_1.20      sp_1.2-5          stringi_1.1.5    
-[25] compiler_3.4.2    mvtnorm_1.0-6    
+ [9] stringr_1.2.0     tools_3.4.2       gtable_0.2.0      DBI_0.7          
+[13] coda_0.19-1       RPostgreSQL_0.6-2 lazyeval_0.2.1    digest_0.6.12    
+[17] tibble_1.3.4      nloptr_1.0.4      codetools_0.2-15  curl_3.0         
+[21] deSolve_1.20      sp_1.2-5          stringi_1.1.5     compiler_3.4.2   
+[25] mvtnorm_1.0-6    
