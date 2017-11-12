@@ -150,10 +150,11 @@ Now profile on the fraction, $\sigma$, of susceptibles in the population.
 This assumes a single, global value of $\sigma$.
 **NOTE: the $\beta$ are here scaled by population size.**
 
-```{r sigma-profile}
+```{r sigma-profile,eval=FALSE}
 ```
 ```{r sigma-profile-plot}
-sigmaProf %>%
+readRDS("sigma-bar.rds") -> sigmaBar
+readRDS("sigma-profile.rds") %>%
     ggplot(aes(x=sigma,y=dev))+geom_line()
 ```
 
