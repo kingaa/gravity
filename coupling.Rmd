@@ -83,6 +83,7 @@ library(magrittr)
 library(foreach)
 library(iterators)
 library(bbmle)
+library(nloptr)
 library(pomp)
 library(ggplot2)
 theme_set(theme_bw())
@@ -255,13 +256,16 @@ bake("gravity-mle.rds",{
 
 ```{r gravity-results}
 results %>%
-    extract(sapply(results,inherits,"try-error")) %>%
-    sapply(as.character) %>%
-    unique()
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
 
 results %<>%
-    extract(!sapply(results,inherits,"try-error")) %>%
-    ldply() 
+  extract(!sapply(results,inherits,"try-error")) %>%
+  ldply() %>%
+  mutate(rho=exp(rho),theta=exp(theta),psi=exp(psi),phi=exp(phi))
+
+results %>% count(~conv)
 
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
@@ -272,6 +276,36 @@ results %>%
   geom_vline(color='red',size=0.2,linetype=2,data=mle.grav,aes(xintercept=tau1))+
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
+
+Regarding NLOPT return values:
+
+**Successful termination (positive return values)**
+
+- NLOPT_SUCCESS = 1
+Generic success return value.
+- NLOPT_STOPVAL_REACHED = 2
+Optimization stopped because stopval (above) was reached.
+- NLOPT_FTOL_REACHED = 3
+Optimization stopped because ftol_rel or ftol_abs (above) was reached.
+- NLOPT_XTOL_REACHED = 4
+Optimization stopped because xtol_rel or xtol_abs (above) was reached.
+- NLOPT_MAXEVAL_REACHED = 5
+Optimization stopped because maxeval (above) was reached.
+- NLOPT_MAXTIME_REACHED = 6
+Optimization stopped because maxtime (above) was reached.
+
+**Error codes (negative return values)**
+
+- NLOPT_FAILURE = -1
+Generic failure code.
+- NLOPT_INVALID_ARGS = -2
+Invalid arguments (e.g. lower bounds are bigger than upper bounds, an unknown algorithm was specified, etcetera).
+- NLOPT_OUT_OF_MEMORY = -3
+Ran out of memory.
+- NLOPT_ROUNDOFF_LIMITED = -4
+Halted because roundoff errors limited progress. (In this case, the optimization still typically returns a useful result.)
+- NLOPT_FORCED_STOP = -5
+Halted because of a forced termination: the user called nlopt_force_stop(opt) on the optimization’s  nlopt_opt object opt from the user’s objective function or constraints.
 
 ```{r gravity-pairsplot,fig.height=6.83}
 pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
@@ -330,7 +364,8 @@ results %>%
 
 results %<>%
   extract(!sapply(results,inherits,"try-error")) %>%
-    ldply() 
+  ldply() %>%
+  mutate(rho=exp(rho),theta=exp(theta),psi=exp(psi),phi=exp(phi))
 
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
@@ -403,7 +438,8 @@ results %>%
 
 results %<>%
   extract(!sapply(results,inherits,"try-error")) %>%
-    ldply() 
+  ldply() %>%
+  mutate(rho=exp(rho),theta=exp(theta),psi=exp(psi),phi=exp(phi))
 
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
@@ -473,9 +509,10 @@ results %>%
   unique()
 
 results %<>%
-    extract(!sapply(results,inherits,"try-error")) %>%
-    ldply() %>%
-    subset(is.finite(loglik))
+  extract(!sapply(results,inherits,"try-error")) %>%
+  ldply() %>%
+  subset(is.finite(loglik)) %>%
+  mutate(theta=exp(theta),psi=exp(psi),phi=exp(phi))
 
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
