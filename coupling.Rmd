@@ -1,6 +1,8 @@
 ---
 title: "Spatial coupling in measles via fade-out survival analysis"
 csl: ecology.csl
+params:
+  prefix: "coupling"
 output:
   html_document:
     code_folding: show
@@ -35,7 +37,6 @@ Produced with **R** version `r getRversion()`.
 
 ```{r knitr-opts,include=FALSE,cache=FALSE}
 library(knitr)
-prefix <- "coupling"
 opts_chunk$set(
   eval=TRUE,
   purl=FALSE,
@@ -52,8 +53,8 @@ opts_chunk$set(
   fig.show='asis',
   size='small',
   fig.lp="fig:",
-  fig.path=paste0("figure/",prefix,"-"),
-  cache.path=paste0("cache/",prefix,"-"),
+  fig.path=paste0("figure/",params$prefix,"-"),
+  cache.path=paste0("cache/",params$prefix,"-"),
   fig.pos="h!",
   fig.align='center',
   fig.height=4,fig.width=6.83,
@@ -62,7 +63,7 @@ opts_chunk$set(
   dev.args=list(bg='transparent')
   )
 read_chunk("tsir.R")
-read_chunk("modelfits.R")
+read_chunk("measfits.R")
 ```
 
 # Preparations

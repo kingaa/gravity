@@ -1,6 +1,8 @@
 library(aakmisc)
+library(readr)
 library(dplyr)
 library(tidyr)
+library(reshape2)
 library(stringi)
 
 options(aakmisc.dbname="us_commute",
