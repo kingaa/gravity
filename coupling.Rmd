@@ -62,18 +62,19 @@ opts_chunk$set(
   dev='png',
   dev.args=list(bg='transparent')
   )
-read_chunk("tsir.R")
-read_chunk("measfits.R")
 ```
 
 # Preparations
 
-```{r prelims,cache=FALSE}
+```{r prelims,cache=FALSE,purl=TRUE}
 options(
   keep.source=TRUE,
   stringsAsFactors=FALSE,
   knitr.kable.NA="",
-  encoding="UTF-8")
+  encoding="UTF-8",
+  aakmisc.dbname="ewmeasles",
+  aakmisc.remotehost="kinglab.eeb.lsa.umich.edu",
+  aakmisc.user="gravity")
 
 set.seed(594709947L)
 
@@ -96,7 +97,25 @@ registerDoMC()
 
 Retrieve the data from the database.
 
-```{r clean-data,eval=FALSE}
+```{r clean-data,eval=TRUE,purl=TRUE}
+library(aakmisc)
+
+startTunnel()
+
+getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
+
+getQuery("select town,date,cases from measles where year>=1944 order by town,date") %>%
+  mutate(year=as.integer(format(date+3,"%Y"))) %>%
+  ddply(~town+year,mutate,week=seq_along(year),biweek=(week+1)%/%2) %>%
+  subset(week<=52,select=-c(date,week)) %>%
+  acast(town~year~biweek,value.var="cases",fun.aggregate=sum) %>%
+  melt(varnames=c("town","year","biweek"),value.name="cases") %>%
+  mutate(town=as.character(town)) %>%
+  arrange(town,year,biweek) %>%
+  join(demog,by=c("town","year")) %>%
+  mutate(births=births/26) -> dat
+
+stopTunnel()
 ```
 
 In the above:
@@ -110,7 +129,21 @@ In the above:
 
 Now let's compute the distances between the cities.
 
-```{r distances,eval=FALSE}
+```{r distances,eval=FALSE,purl=TRUE}
+bake(file="distances.rds",{
+  library(aakmisc)
+
+  startTunnel()
+  getQuery("select * from coords") %>% arrange(town) -> coords
+  stopTunnel()
+  rownames(coords) <- coords$town
+
+  library(geosphere)
+  distm(coords %>% subset(select=c(long,lat)),
+        coords %>% subset(select=c(long,lat))) %>%
+    matrix(nrow=nrow(coords),ncol=nrow(coords),
+           dimnames=list(coords$town,coords$town))
+}) -> distances
 ```
 
 ## Apply TSIR model to the individual towns.
@@ -122,12 +155,26 @@ Correct for under-reporting: `I = cases/ur`.
 
 Regress cumulative cases on cumulative births to estimate under-reporting (ur) and susceptible depletion (`z`) `I` is estimated as `cases/ur`.
 
-```{r under-reporting,eval=FALSE}
+```{r under-reporting,eval=FALSE,purl=TRUE}
+foreach (d=dlply(dat,~town),.combine=rbind,.inorder=FALSE) %dopar% {
+  cumbirths <- cumsum(d$births)
+  cumcases <- cumsum(d$cases)
+  fit <- smooth.spline(cumbirths,cumcases,df=2.5)
+  mutate(d,
+         ur=predict(fit,x=cumbirths,deriv=1)$y,
+         I=cases/ur)
+} -> dat
 ```
 
 Now reconstruct the susceptibles (via the residuals `z`).
 
-```{r susceptible-reconstruction,eval=FALSE}
+```{r susceptible-reconstruction,eval=FALSE,purl=TRUE}
+foreach (d=dlply(dat,~town),.combine=rbind,.inorder=FALSE) %dopar% {
+  cumbirths <- cumsum(d$births)
+  cuminc <- cumsum(d$I)
+  fit <- smooth.spline(cumbirths,cuminc,df=2.5)
+  mutate(d,z=-residuals(fit))
+} -> dat
 ```
 
 *Does the preceding scale the z variable appropriately?*
@@ -139,21 +186,70 @@ First, set up the data matrix for the regression.
 This involves lagging the I and z variables.
 Population size is assumed constant at its median value.
 
-```{r make-data-matrix,eval=FALSE}
+```{r make-data-matrix,eval=FALSE,purl=TRUE}
+dat %>%
+  ddply(~town,mutate,
+        Ilag=c(NA,head(I,-1)),
+        zlag=c(NA,head(z,-1)),
+        Ps=median(pop),
+        seas=factor(biweek,levels=1:26)) %>%
+  ddply(~town,tail,-1) -> dat
 ```
 
 We'll start by estimating the mean susceptible fraction, assuming a single global value for this parameter.
 Some towns have very high changes in susceptible fraction; exclude these.
 
-```{r exclude-weird-towns,eval=FALSE}
+```{r exclude-weird-towns,eval=FALSE,purl=TRUE}
+dat %>%
+  ddply(~town,summarize,
+        maxfrac=max(-z/Ps)) %>%
+  subset(maxfrac>0.03) %>%
+  extract2("town") -> excludes
+
+print(length(excludes))
 ```
 
 Now profile on the fraction, $\sigma$, of susceptibles in the population.
 This assumes a single, global value of $\sigma$.
 **NOTE: the $\beta$ are here scaled by population size.**
 
-```{r sigma-profile,eval=FALSE}
+```{r sigma-profile,eval=FALSE,purl=TRUE}
+dat %>% subset(!(town%in%excludes)) -> dat1
+
+sigma1dev <- function (dat, sigma) {
+  slag <- with(dat,sigma*Ps+zlag)
+  fit <- glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(log(slag)),
+             data=dat,subset=Ilag>0&I>0)
+  fit$deviance
+}
+
+foreach (sigma=seq(0.03,0.25,length=100),
+         .combine=rbind,.inorder=FALSE) %dopar%
+         {
+           dat1 %>%
+             daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>%
+             sum() -> dev
+           data.frame(sigma=sigma,dev=dev)
+         } -> sigmaProf
+
+sigmaProf %>% saveRDS("sigma-profile.rds")
+
+fit <- optim(par=0.037,lower=0.03,upper=0.10,
+             method="Brent",hessian=TRUE,
+             fn=function (sigma) {
+               dat1 %>%
+                 daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>%
+                 sum()
+             })
+fit$par -> sigmaBar
+
+rm(dat1)
+
+sigmaBar %>% saveRDS("sigma-bar.rds")
+
+dat %>% mutate(Slag=sigmaBar*Ps+zlag) -> dat
 ```
+
 ```{r sigma-profile-plot}
 readRDS("sigma-bar.rds") -> sigmaBar
 readRDS("sigma-profile.rds") %>%
@@ -163,7 +259,47 @@ readRDS("sigma-profile.rds") %>%
 Our global sigma estimate is $\sigma=`r signif(sigmaBar,3)`$.
 Now, we assume this value of $\sigma$ and fit TSIR to each of the towns individually using linear regression.
 
-```{r fit-tsir}
+```{r fit-tsir,purl=TRUE}
+bake(file="tsir-fits.rds",{
+  coefnames <- c(sprintf("seas%d",1:26),"log(Ilag)","I(1/Ilag)")
+  newcoefnames <- c(sprintf("log.beta%02d",1:26),"alpha","m.alpha")
+
+  tsirfit <- function (dat) {
+    glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(log(Slag)),
+        data=dat,subset=Ilag>0&I>0) %>% summary() %>%
+      extract2("coefficients") -> fit
+    fit[,"Estimate"] %>% extract(coefnames) %>% as.list() %>% as.data.frame() %>%
+      set_names(newcoefnames) -> coefs
+    fit[,"Std. Error"] %>% extract(coefnames) %>% as.list() %>% as.data.frame() %>%
+      set_names(paste(newcoefnames,"se",sep=".")) -> se
+    cbind(coefs,se,sigma=sigmaBar,
+          town=unique(dat$town),Ps=unique(dat$Ps))
+  }
+
+  dat %>% ddply(~town,tsirfit,.parallel=TRUE) %>%
+    melt(id=c("town","Ps")) %>%
+    mutate(se=ifelse(grepl("\\.se$",variable),"se","est"),
+           variable=sub("\\.se$","",variable)) %>%
+    dcast(town+Ps+variable~se) -> tsirs
+
+  dat %>% ddply(~town,summarize,Ps=unique(Ps)) -> tsircoef
+
+  tsirs %>%
+    na.omit() %>%
+    ddply(~variable, function (d) {
+      fit <- lm(est~log(Ps),data=d,weights=1/se^2)
+      data.frame(town=tsircoef$town,value=predict(fit,newdata=tsircoef))
+    },.parallel=TRUE) %>%
+    dcast(town~variable) %>%
+    melt(id=c("town","alpha","m.alpha"),value.name="log.beta") %>%
+    mutate(biweek=as.integer(sub("log.beta","",as.character(variable)))) %>%
+    arrange(town,biweek) %>%
+    subset(select=-variable) -> tsircoef
+
+  dat %>%
+    join(tsircoef,by=c("town","biweek")) %>%
+    mutate(ylag=Ilag/Ps) -> dat
+}) -> dat
 ```
 
 Just for interest, let's plot $R_0$ as a function of city size.
@@ -204,7 +340,33 @@ It also picks out the relevant observations.
 These are the ones for which the preceding week saw zero cases.
 
 
-```{r gravity-pre}
+```{r gravity-pre,purl=TRUE}
+readRDS("tsir-fits.rds") -> dat
+dat %>% acast(town~year+biweek,value.var="ylag") -> ylag
+dat %>% acast(town~year+biweek,value.var="Slag") -> slag
+dat %>% acast(town~year+biweek,value.var="log.beta") %>% exp() -> beta
+dat %>% acast(town~year+biweek,value.var="cases") -> obs
+dat %>% daply(~town,function(x)unique(x$Ps)) -> N
+
+readRDS("distances.rds") -> distances
+dd <- 1/distances
+diag(dd) <- 0
+
+stopifnot(identical(rownames(ylag),rownames(slag)))
+stopifnot(identical(rownames(ylag),rownames(beta)))
+stopifnot(identical(rownames(ylag),rownames(obs)))
+stopifnot(identical(rownames(ylag),names(N)))
+stopifnot(identical(rownames(ylag),rownames(dd)))
+stopifnot(identical(rownames(ylag),colnames(dd)))
+
+ddscal <- exp(mean(log(dd[lower.tri(dd)])))
+dd <- dd/ddscal
+
+alpha <- mean(dat$alpha)
+
+relevant <- which(ylag==0&slag>=0)
+obs <- obs[relevant]
+betaS <- beta[relevant]*slag[relevant]
 ```
 
 # The gravity model
@@ -223,12 +385,97 @@ $$\mathrm{diag}(A)\,B=A\;*\;B.$$
 
 
 The negative log likelihood function for the gravity model is:
-```{r gravity-like}
+```{r gravity-like,purl=TRUE}
+likfnGravity <- function (theta, phi, rho, psi, tau1, tau2) {
+  theta <- exp(theta)
+  phi <- exp(phi)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
+}
 ```
 
 Now we'll do a likelihood profile over $\tau_1$ and $\tau_2$.
 
-```{r gravity-profile-2D,cache=FALSE}
+```{r gravity-profile-2D,cache=FALSE,purl=TRUE}
+bake(file="gravity.rds",{
+
+  grd <- profileDesign(
+    tau1=seq(0.1, 1.4, length=25),
+    tau2=seq(-1, 1, length=25),
+    lower=c(psi=log(5),theta=log(1e-8),phi=log(1e-6),rho=log(0.9)),
+    upper=c(psi=log(7),theta=log(1),phi=log(1e-2),rho=log(1.7)),
+    nprof=10
+  )
+
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau1","tau2")
+      formals(likfnGravity) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+             function(x){
+               do.call(likfnGravity,
+                       c(start[fixed],setNames(as.list(x),est)))
+             },
+             opts=list(
+               algorithm="NLOPT_LN_SBPLX",
+               ftol_abs=1000,
+               maxeval=10000)
+             ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+     }
+  ) -> results
+
+  results %>%
+    extract(sapply(results,inherits,"try-error")) %>%
+    sapply(as.character) %>%
+    unique() %>%
+    print()
+
+  results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    ddply(~tau1+tau2,subset,loglik==max(loglik,na.rm=TRUE)) -> grd
+
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau1","tau2")
+      formals(likfnGravity) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+             function(x){
+               do.call(likfnGravity,
+                       c(start[fixed],setNames(as.list(x),est)))
+             },
+             opts=list(
+               algorithm="NLOPT_LN_SBPLX",
+               ftol_abs=1e-5,
+               xtol_rel=1e-7,
+               maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> results
+
+
+  attr(results,"nproc") <- getDoParWorkers()
+  results
+}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster.
@@ -314,6 +561,9 @@ pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
       subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
+We look for evidence of overdispersion by computing the scale parameter for the negative binomial model.
+
+
 # The Xia (wonky gravity) model
 
 The model of @xia2004measles is
@@ -327,12 +577,53 @@ $$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y^{\tau_2}+\phi\,N^{\tau_1}.$$
 
 The negative log likelihood function for the @xia2004measles model is:
 
-```{r xia-like}
+```{r xia-like,purl=TRUE}
+likfnXia <- function (theta, phi, rho, psi, tau1, tau2) {
+  theta <- exp(theta)
+  phi <- exp(phi)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  iota <- (N^tau1)*(theta*crossprod(Q,ylag^tau2)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
+}
 ```
 
 Again, a profile computation.
 
-```{r xia-profile-2D,cache=FALSE}
+```{r xia-profile-2D,cache=FALSE,purl=TRUE}
+bake(file="xia.rds",{
+
+  grd <- expand.grid(
+    tau1=seq(0.1, 1.5, length=25),
+    tau2=seq(0.1, 1.0, length=25),
+    psi=log(5),
+    rho=log(1.0),
+    theta=log(1e-6),
+    phi=log(1e-6)
+  )
+
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .packages="bbmle"
+  ) %dopar% try(
+    {
+      mle2(likfnXia,
+           method="Nelder-Mead",
+           start=as.list(start[c("rho","theta","psi","phi")]),
+           fixed=as.list(start[c("tau1","tau2")]),
+           control=list(trace=0,maxit=10000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),
+        conv=fit@details$convergence)
+    }
+  ) -> results
+
+  attr(results,"nproc") <- getDoParWorkers()
+
+  results
+}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
@@ -399,12 +690,100 @@ $$\iota_i=N_i^{\tau_1}\,\left(\theta\,\sum_j Q_{ji}\,R_{ji}^\delta\,y_{j}+\phi\r
 
 The negative log likelihood function for the competing destinations model is:
 
-```{r compdest-like}
+```{r compdest-like,purl=TRUE}
+iii <- 1-diag(length(N))
+
+likfnCompDest <- function (theta, phi, rho, psi, tau1, tau2, delta) {
+  theta <- exp(theta)
+  phi <- exp(phi)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  R <- crossprod(Q,iii)^delta
+  iota <- (N^tau1)*(theta*crossprod(Q*R,ylag)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
+}
 ```
 
 We compute the profile likelihood as before.
 
-```{r compdest-profile-2D,cache=FALSE}
+```{r compdest-profile-2D,cache=FALSE,purl=TRUE}
+bake(file="compdest.rds",{
+
+  grd <- profileDesign(
+    tau1=seq(0.1, 1.4, length=25),
+    tau2=seq(-1, 1, length=25),
+    lower=c(psi=log(5),theta=log(0.1),phi=log(1e-6),rho=log(1.5),delta=-3),
+    upper=c(psi=log(7),theta=log(45),phi=log(1e-2),rho=log(30),delta=0),
+    nprof=20
+  )
+
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau1","tau2")
+      formals(likfnCompDest) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+             function(x){
+               do.call(likfnCompDest,
+                       c(start[fixed],setNames(as.list(x),est)))
+             },
+             opts=list(
+               algorithm="NLOPT_LN_SBPLX",
+               ftol_abs=1000,
+               maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> results
+
+  results %>%
+    extract(sapply(results,inherits,"try-error")) %>%
+    sapply(as.character) %>%
+    unique() %>%
+    print()
+
+  results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    ddply(~tau1+tau2,subset,loglik==max(loglik,na.rm=TRUE)) -> grd
+
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau1","tau2")
+      formals(likfnCompDest) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+             function(x){
+               do.call(likfnCompDest,
+                       c(start[fixed],setNames(as.list(x),est)))
+             },
+             opts=list(
+               algorithm="NLOPT_LN_SBPLX",
+               ftol_abs=1e-5,
+               xtol_rel=1e-7,
+               maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> results
+
+  attr(results,"nproc") <- getDoParWorkers()
+
+  results
+}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
@@ -467,17 +846,64 @@ That is, $S(i,j) = \{k: k\ne i \ \&\ d(i,k) \le d(i,j)\}$.
 $$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}+\phi\right).$$
 
 
-```{r rankmat,cache=FALSE}
+```{r rankmat,cache=FALSE,purl=TRUE}
+bake(file="rankmat.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      rr[i,j] <- N[j]/(sum(N[distances[i,]<=distances[i,j]])-N[i])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
 ```
 
 The negative log likelihood function for the @xia2004measles model is:
 
-```{r stouffer-like}
+```{r stouffer-like,purl=TRUE}
+likfnStouffer <- function (theta, phi, tau1, tau2, psi) {
+  theta <- exp(theta)
+  phi <- exp(phi)
+  iota <- (N^tau1)*(theta*((rr^tau2)%*%ylag)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
+}
 ```
 
 We compute the profile likelihood as before.
 
-```{r stouffer-profile-2D,cache=FALSE}
+```{r stouffer-profile-2D,cache=FALSE,purl=TRUE}
+bake(file="stouffer.rds",{
+
+  grd <- expand.grid(
+    tau1=seq(0.5, 1.2, length=25),
+    tau2=seq(0.5, 2.0, length=25),
+    theta=log(0.2),
+    phi=log(0.0001),
+    psi=log(5)
+  )
+
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .packages="bbmle"
+  ) %dopar% try(
+    {
+      mle2(likfnStouffer,
+           method="Nelder-Mead",
+           start=as.list(start[c("theta","phi","psi")]),
+           fixed=as.list(start[c("tau1","tau2")]),
+           control=list(trace=0,maxit=10000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
+    }
+  ) -> results
+
+  attr(results,"nproc") <- getDoParWorkers()
+
+  results
+}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
@@ -541,15 +967,62 @@ Note that $S'(i,j)$ includes $i$, whilst $S(i,j)$ does not.
 $$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S'(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}+\phi\right)$$
 
 
-```{r rankmat1,cache=FALSE}
+```{r rankmat1,cache=FALSE,purl=TRUE}
+bake(file="rankmat1.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      rr[i,j] <- N[j]/sum(N[distances[i,]<=distances[i,j]])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
 ```
 
-```{r stouffer1-like}
+```{r stouffer1-like,purl=TRUE}
+likfnStouffer1 <- function (theta, phi, tau1, tau2, psi) {
+  theta <- exp(theta)
+  phi <- exp(phi)
+  iota <- (N^tau1)*(theta*(rr^tau2)%*%ylag+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
+}
 ```
 
 The profile likelihood computation.
 
-```{r stouffer1-profile-2D,cache=FALSE}
+```{r stouffer1-profile-2D,cache=FALSE,purl=TRUE}
+bake(file="stouffer1.rds",{
+
+  grd <- expand.grid(
+    tau1=seq(0.5, 1.2, length=25),
+    tau2=seq(0.5, 2.0, length=25),
+    theta=log(0.2),
+    phi=log(0.0001),
+    psi=log(5)
+  )
+
+  foreach(start=iter(grd,"row"),
+          .errorhandling="pass",
+          .inorder=FALSE,
+          .packages="bbmle"
+  ) %dopar% try(
+    {
+      mle2(likfnStouffer1,
+           method="Nelder-Mead",
+           start=as.list(start[c("theta","phi","psi")]),
+           fixed=as.list(start[c("tau1","tau2")]),
+           control=list(trace=0,maxit=10000),
+           skip.hessian=TRUE) -> fit
+      c(coef(fit),loglik=as.numeric(logLik(fit)),conv=fit@details$convergence)
+    }
+  ) -> results
+
+  attr(results,"nproc") <- getDoParWorkers()
+
+  results
+}) -> results
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
@@ -607,7 +1080,18 @@ pairs(~loglik+theta+phi+psi+tau1+tau2,
 
 $$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
 
-```{r radmat,cache=FALSE}
+```{r radmat,cache=FALSE,purl=TRUE}
+bake(file="radmat.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      s <- sum(N[distances[i,]<=distances[i,j]])
+      rr[i,j] <- N[i]*N[j]*N[j]/s/(s-N[i])
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
 ```
 
 ```{r radiation-like}
@@ -640,7 +1124,18 @@ c(coef(fit),loglik=logLik(fit)) %>%
 
 $$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}$$
 
-```{r radmat1,cache=FALSE}
+```{r radmat1,cache=FALSE,purl=TRUE}
+bake(file="radmat1.rds",{
+  rr <- array(dim=dim(distances),dimnames=dimnames(distances))
+  for (i in seq_along(N)) {
+    for (j in seq_along(N)) {
+      s <- sum(N[distances[i,]<=distances[i,j]])
+      rr[i,j] <- N[i]*N[j]*N[j]/(s+N[i])/(s)
+    }
+  }
+  diag(rr) <- 0
+  rr
+}) -> rr
 ```
 
 ```{r radiation1-like}
@@ -673,6 +1168,69 @@ c(coef(fit),loglik=logLik(fit)) %>%
 # Model comparison
 
 ```{r modelcomp,cache=FALSE,echo=FALSE}
+scalGravity <- function (theta, phi, rho, psi, tau1, tau2, loglik) {
+  npar <- 6
+  theta <- exp(theta)
+  phi <- exp(phi)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  var <- lambda+lambda*lambda*exp(psi)
+  sum((obs-lambda)^2/var)/(length(obs)-npar)
+}
+
+scalXia <- function (theta, phi, rho, psi, tau1, tau2, loglik) {
+  npar <- 6
+  theta <- exp(theta)
+  phi <- exp(phi)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  iota <- (N^tau1)*(theta*crossprod(Q,ylag^tau2)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  var <- lambda+lambda*lambda*exp(psi)
+  sum((obs-lambda)^2/var)/(length(obs)-npar)
+}
+
+scalCompDest <- function (theta, phi, rho, psi, tau1, tau2, delta, loglik) {
+  npar <- 7
+  theta <- exp(theta)
+  phi <- exp(phi)
+  rho <- exp(rho)
+  Q <- (N^tau2)*(dd^rho)
+  R <- crossprod(Q,iii)^delta
+  iota <- (N^tau1)*(theta*crossprod(Q*R,ylag)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  var <- lambda+lambda*lambda*exp(psi)
+  sum((obs-lambda)^2/var)/(length(obs)-npar)
+}
+
+scalStouffer <- function (theta, phi, tau1, tau2, psi, loglik) {
+  npar <- 5
+  theta <- exp(theta)
+  phi <- exp(phi)
+  iota <- (N^tau1)*(theta*((rr^tau2)%*%ylag)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  var <- lambda+lambda*lambda*exp(psi)
+  sum((obs-lambda)^2/var)/(length(obs)-npar)
+}
+
+scalStouffer1 <- function (theta, phi, tau1, tau2, psi, loglik) {
+  npar <- 5
+  theta <- exp(theta)
+  phi <- exp(phi)
+  iota <- (N^tau1)*(theta*(rr^tau2)%*%ylag+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  var <- lambda+lambda*lambda*exp(psi)
+  sum((obs-lambda)^2/var)/(length(obs)-npar)
+}
+
+mle.grav %<>% mutate(cHat=scalGravity(theta,phi,rho,psi,tau1,tau2,loglik))
+mle.xia %<>% mutate(cHat=scalXia(theta,phi,rho,psi,tau1,tau2,loglik))
+mle.compdest %<>% mutate(cHat=scalCompDest(theta,phi,rho,psi,tau1,tau2,delta,loglik))
+mle.stouffer %<>% mutate(cHat=scalStouffer(theta,phi,tau1,tau2,psi,loglik))
+mle.stouffer1 %<>% mutate(cHat=scalStouffer1(theta,phi,tau1,tau2,psi,loglik))
+
 list(gravity=mle.grav,
      xia=mle.xia,
      comp.dest=mle.compdest,
@@ -683,8 +1241,8 @@ list(gravity=mle.grav,
   ldply(.id="model") %>%
   arrange(-loglik) %>%
   mutate(rho=exp(rho),psi=exp(psi),delta.loglik=loglik-max(loglik)) %>%
-  subset(select=c(model,loglik,delta.loglik,theta,phi,rho,tau1,tau2,delta,psi)) %>%
-  rename(c(theta="$\\log{\\theta}$",phi="$\\log{\\phi}$",rho="$\\rho$",
+  subset(select=c(model,loglik,cHat,delta.loglik,theta,phi,rho,tau1,tau2,delta,psi)) %>%
+  rename(c(theta="$\\log{\\theta}$",cHat="$\\hat{c}$",phi="$\\log{\\phi}$",rho="$\\rho$",
     psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
     loglik="$\\ell$",delta.loglik="$\\Delta\\!\\ell$")) %>%
   kable(digits=3)
