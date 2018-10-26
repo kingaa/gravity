@@ -1323,16 +1323,16 @@ mle.radiation1 %$% {
 ```
 
 ```{r import_export,fig.height=6.83}
-library(tidyr)
-
 data.frame(
   SV=SVmat %>% rowMeans(),
   ST=STmat %>% rowMeans(),
   GR=GRmat %>% rowMeans(),
   CD=CDmat %>% rowMeans(),
+  RV=RVmat %>% rowMeans(),
+  RD=RDmat %>% rowMeans(),
   N=N
 ) %>% 
-  gather(model,imports,-N) %>%
+  tidyr::gather(model,imports,-N) %>%
   ggplot(aes(x=N,y=imports/N,color=model))+
   geom_point(alpha=1)+scale_x_log10()+scale_y_log10()+
   facet_grid(model~.)
@@ -1342,17 +1342,20 @@ data.frame(
   ST=STmat %>% colMeans(),
   GR=GRmat %>% colMeans(),
   CD=CDmat %>% colMeans(),
+  RV=RVmat %>% colMeans(),
+  RD=RDmat %>% colMeans(),
   N=N
 ) %>% 
-  gather(model,exports,-N) %>%
+  tidyr::gather(model,exports,-N) %>%
   ggplot(aes(x=N,y=exports/N,color=model))+
   geom_point(alpha=1)+scale_x_log10()+scale_y_log10()+
   facet_grid(model~.)
 ```
+
 ```{r}
- startTunnel()
-  getQuery("select * from coords") %>% arrange(town) -> coords
-  stopTunnel()
+startTunnel()
+getQuery("select * from coords") %>% arrange(town) -> coords
+stopTunnel()
 
 imp=data.frame(
   SV=SVmat %>% rowMeans(),
@@ -1368,28 +1371,90 @@ spatial.plot(imp$long, imp$lat, imp$CD-imp$GR, main="CD-GR", ctr=FALSE)
 spatial.plot(imp$long, imp$lat, imp$CD-imp$SV, main="CD-SV", ctr=FALSE)
 ```
 
+```{r maps,message=FALSE}
+library(rgdal)
+readOGR("GreatBritain.shp") -> gb
 
+data.frame(
+  SV_import=SVmat %>% rowMeans(),
+  ST_import=STmat %>% rowMeans(),
+  GR_import=GRmat %>% rowMeans(),
+  CD_import=CDmat %>% rowMeans(),
+  RV_import=RVmat %>% rowMeans(),
+  RD_import=RDmat %>% rowMeans(),
+  SV_export=SVmat %>% colMeans(),
+  ST_export=STmat %>% colMeans(),
+  GR_export=GRmat %>% colMeans(),
+  CD_export=CDmat %>% colMeans(),
+  RV_export=RVmat %>% colMeans(),
+  RD_export=RDmat %>% colMeans(),
+  N=N
+) %>% 
+  name_rows() %>%
+  dplyr::rename(town=.rownames) %>%
+  tidyr::gather(variable,value,-N,-town) %>%
+  tidyr::separate(variable,into=c("model","variable")) %>%
+  tidyr::spread(variable,value) %>%
+  dplyr::arrange(-N,town,model) %>%
+  dplyr::mutate(erate=export/N,irate=import/N) -> impexp
 
-We next create the fade-out plot
-```{r fadeout-plot,fig.height=6.83}
-dat$E=dat$cases==0 
-dat %>% ddply(~town,summarize,mean(E)) -> ext
+startTunnel()
+getQuery("select * from coords") %>% arrange(town) -> coords
+stopTunnel()
 
-par(mfrow=c(1,1))
-par(mar = c(5,5,2,5))
-plot(ext[,2]~N, log="x", xlab="Pop.size", ylab="Presence")
+join(impexp,coords,by="town") -> impexp
 
-par(new=T)
+impexp %>%
+  dplyr::select(town,model,erate,irate) %>%
+  dplyr::filter(model %in% c("GR","ST","CD","SV")) %>%
+  tidyr::gather(variable,value,erate,irate) %>%
+  acast(model~town~variable,value.var="value") %>%
+  aaply(c(2,3),function(x)outer(x,x,FUN="-")) %>%
+  melt() %>%
+  dplyr::rename(town=X1,variable=X2,m1=Var3,m2=Var4) %>% 
+  mutate(
+    m1=ordered(m1,levels=c("GR","ST","CD","SV")),
+    m2=ordered(m2,levels=c("GR","ST","CD","SV"))
+  ) %>%
+  dplyr::filter(m1 > m2) %>% 
+  tidyr::spread(variable,value) %>%
+  dplyr::left_join(coords,by="town") -> ied
 
-plot(log(ext[,2]/(1-ext[,2]))~N, log="x",type="p", col="red", axes=FALSE, xlab=NA, ylab=NA)
-axis(side = 4)
-mtext(side = 4, line = 4, "logit")
-legend("topright",
-  legend=c("Presence", "logit"),
-  pch=c(21,21),
-  col=c("black", "red"))
+gb %>% 
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map()+
+  geom_point(
+    data=ied %>% arrange(abs(irate)),
+    aes(x=long,y=lat,color=irate,size=irate),
+    alpha=0.25
+    )+
+  scale_size_area(max_size=2)+
+  lims(y=c(50,55.5))+
+  scale_color_gradient2(mid="gray90")+
+  labs(title="differences in predicted import rates",
+    color=expression(Delta~i),
+    size=expression(Delta~i))+
+  facet_wrap(~m1+m2,nrow=1)
+
+gb %>% 
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map()+
+  geom_point(
+    data=ied %>% arrange(abs(erate)),
+    aes(x=long,y=lat,color=erate,size=erate),
+    alpha=0.25
+    )+
+  scale_size_area(max_size=2)+
+  lims(y=c(50,55.5))+
+  scale_color_gradient2(mid="gray90")+
+  labs(title="differences in predicted export rates",
+    color=expression(Delta~i),
+    size=expression(Delta~i))+
+  facet_wrap(~m1+m2,nrow=1)
+
 ```
-
 
 # Next steps
 
@@ -1412,5 +1477,34 @@ Plots:
 1. Revisit $\sigma$ profile
 1. Revisit TSIR fitting (include residuals?)
 1. Include references for the various models.
+
+We next create the fade-out plot
+
+```{r fadeout-plot,fig.height=4.4}
+dat %>%
+  mutate(
+    E=cases==0,
+  ) %>%
+  ddply(~town,summarize,
+    efrac=mean(E),
+    N=mean(pop)) %>%
+  ggplot(aes(x=N,y=efrac))+
+  geom_point()+
+  scale_x_log10()+
+  labs(y="proportion of zeros")
+
+dat %>%
+  mutate(
+    E=cases==0,
+  ) %>%
+  ddply(~town,summarize,
+    efrac=mean(E),
+    N=mean(pop)) %>%
+  ggplot(aes(x=N,y=efrac))+
+  geom_point()+
+  scale_y_continuous(trans=logit_trans())+
+  scale_x_log10()+
+  labs(y="proportion of zeros")
+```
 
 # References
