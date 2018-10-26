@@ -1168,97 +1168,136 @@ c(coef(fit),loglik=logLik(fit)) %>%
 # Model comparison
 
 ```{r modelcomp,cache=FALSE,echo=FALSE}
-scalGravity <- function (theta, phi, rho, psi, tau1, tau2, loglik) {
+summaryGravity <- function (mle) {
   npar <- 6
-  theta <- exp(theta)
-  phi <- exp(phi)
-  rho <- exp(rho)
-  Q <- (N^tau2)*(dd^rho)
-  iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  var <- lambda+lambda*lambda*exp(psi)
-  sum((obs-lambda)^2/var)/(length(obs)-npar)
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    rho <- exp(rho)
+    Q <- (N^tau2)*(dd^rho)
+    iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>%
+    cbind(mle)
 }
 
-scalXia <- function (theta, phi, rho, psi, tau1, tau2, loglik) {
+summaryXia <- function (mle) {
   npar <- 6
-  theta <- exp(theta)
-  phi <- exp(phi)
-  rho <- exp(rho)
-  Q <- (N^tau2)*(dd^rho)
-  iota <- (N^tau1)*(theta*crossprod(Q,ylag^tau2)+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  var <- lambda+lambda*lambda*exp(psi)
-  sum((obs-lambda)^2/var)/(length(obs)-npar)
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    rho <- exp(rho)
+    Q <- (N^tau2)*(dd^rho)
+    iota <- (N^tau1)*(theta*crossprod(Q,ylag^tau2)+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>% 
+    cbind(mle)
 }
 
-scalCompDest <- function (theta, phi, rho, psi, tau1, tau2, delta, loglik) {
+summaryCompDest <- function (mle) {
   npar <- 7
-  theta <- exp(theta)
-  phi <- exp(phi)
-  rho <- exp(rho)
-  Q <- (N^tau2)*(dd^rho)
-  R <- crossprod(Q,iii)^delta
-  iota <- (N^tau1)*(theta*crossprod(Q*R,ylag)+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  var <- lambda+lambda*lambda*exp(psi)
-  sum((obs-lambda)^2/var)/(length(obs)-npar)
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    rho <- exp(rho)
+    Q <- (N^tau2)*(dd^rho)
+    R <- crossprod(Q,iii)^delta
+    iota <- (N^tau1)*(theta*crossprod(Q*R,ylag)+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>% 
+    cbind(mle)
 }
 
-scalStouffer <- function (theta, phi, tau1, tau2, psi, loglik) {
+summaryStouffer <- function (mle) {
   npar <- 5
   readRDS("rankmat.rds") -> rr
-  theta <- exp(theta)
-  phi <- exp(phi)
-  iota <- (N^tau1)*(theta*((rr^tau2)%*%ylag)+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  var <- lambda+lambda*lambda*exp(psi)
-  sum((obs-lambda)^2/var)/(length(obs)-npar)
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    iota <- (N^tau1)*(theta*((rr^tau2)%*%ylag)+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>% 
+    cbind(mle)
 }
 
-scalStouffer1 <- function (theta, phi, tau1, tau2, psi, loglik) {
+summaryStouffer1 <- function (mle) {
   npar <- 5
   readRDS("rankmat1.rds") -> rr
-  theta <- exp(theta)
-  phi <- exp(phi)
-  iota <- (N^tau1)*(theta*(rr^tau2)%*%ylag+phi)
-  lambda <- betaS*iota[relevant]^alpha
-  var <- lambda+lambda*lambda*exp(psi)
-  sum((obs-lambda)^2/var)/(length(obs)-npar)
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    iota <- (N^tau1)*(theta*(rr^tau2)%*%ylag+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>% 
+    cbind(mle)
 }
 
-mle.grav %<>% mutate(cHat=scalGravity(theta,phi,rho,psi,tau1,tau2,loglik))
-mle.xia %<>% mutate(cHat=scalXia(theta,phi,rho,psi,tau1,tau2,loglik))
-mle.compdest %<>% mutate(cHat=scalCompDest(theta,phi,rho,psi,tau1,tau2,delta,loglik))
-mle.stouffer %<>% mutate(cHat=scalStouffer(theta,phi,tau1,tau2,psi,loglik))
-mle.stouffer1 %<>% mutate(cHat=scalStouffer1(theta,phi,tau1,tau2,psi,loglik))
+summaryRadiation <- function (mle) {
+  npar <- 2
+  readRDS("radmat.rds") -> rr
+  mle %$% {
+    theta <- exp(theta)
+    iota <- theta*(rr%*%ylag)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>% 
+    cbind(mle)
+}
 
-list(gravity=mle.grav,
+summaryRadiation1 <- function (mle) {
+  npar <- 2
+  readRDS("radmat1.rds") -> rr
+  mle %$% {
+    theta <- exp(theta)
+    iota <- theta*(rr%*%ylag)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>% 
+    cbind(mle)
+}
+
+mle.grav %<>% summaryGravity()
+mle.xia %<>% summaryXia()
+mle.compdest %<>% summaryCompDest()
+mle.stouffer %<>% summaryStouffer()
+mle.stouffer1 %<>% summaryStouffer1()
+mle.radiation %<>% summaryRadiation()
+mle.radiation1 %<>% summaryRadiation1()
+
+list(
+  gravity=mle.grav,
   xia=mle.xia,
   comp.dest=mle.compdest,
   stouffer=mle.stouffer,
   stouffer.variant=mle.stouffer1,
   radiation=mle.radiation,
-  radiation.variant=mle.radiation1) %>%
+  radiation.variant=mle.radiation1
+) %>%
   ldply(.id="model") %>%
   arrange(-loglik) %>%
-  mutate(rho=exp(rho),psi=exp(psi),delta.loglik=loglik-max(loglik)) %>%
-  subset(select=c(model,loglik,cHat,delta.loglik,theta,phi,rho,tau1,tau2,delta,psi)) %>%
+  mutate(rho=exp(rho),psi=exp(psi),qaic=-2*loglik/cHat[1]+2*npar,delta.qaic=qaic-min(qaic,na.rm=TRUE)) %>%
+  subset(select=c(model,loglik,qaic,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi)) %>%
   rename(c(theta="$\\log{\\theta}$",cHat="$\\hat{c}$",phi="$\\log{\\phi}$",rho="$\\rho$",
     psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
-    loglik="$\\ell$",delta.loglik="$\\Delta\\!\\ell$")) %>%
+    loglik="$\\ell$",qaic="QAIC",delta.qaic="$\\Delta\\!\\mathrm{QAIC}$")) %>%
   kable(digits=3)
 ```
 
 # Diagnostics
 
 To study whether better statistical fit translates to meaningful improvement on prediction on incidence we can look at CCS patterns:
-
-```
-dat$E=dat$cases==0 
-dat %>% ddply(~town,summarize,mean(E)) -> ext
-plot(ext[,2]~N)
-```
 
 We can predict importation rates from fitted models
 
@@ -1371,9 +1410,9 @@ spatial.plot(imp$long, imp$lat, imp$CD-imp$GR, main="CD-GR", ctr=FALSE)
 spatial.plot(imp$long, imp$lat, imp$CD-imp$SV, main="CD-SV", ctr=FALSE)
 ```
 
-```{r maps,message=FALSE}
+```{r maps,message=FALSE,results="hide"}
 library(rgdal)
-readOGR("GreatBritain.shp") -> gb
+readOGR("EngWal.shp") -> gb
 
 data.frame(
   SV_import=SVmat %>% rowMeans(),
@@ -1426,16 +1465,18 @@ gb %>%
   coord_map()+
   geom_point(
     data=ied %>% arrange(abs(irate)),
-    aes(x=long,y=lat,color=irate,size=irate),
-    alpha=0.25
+    aes(x=long,y=lat,color=irate,alpha=abs(irate)),
+    size=1
     )+
-  scale_size_area(max_size=2)+
-  lims(y=c(50,55.5))+
+  # scale_size_area(max_size=2)+
+  guides(alpha=FALSE)+
   scale_color_gradient2(mid="gray90")+
   labs(title="differences in predicted import rates",
     color=expression(Delta~i),
-    size=expression(Delta~i))+
-  facet_wrap(~m1+m2,nrow=1)
+    size=expression(Delta~i),
+    x="",y="")+
+  facet_wrap(~m1+m2,nrow=2)+
+  theme(axis.text=element_blank())
 
 gb %>% 
   ggplot(aes(x=long,y=lat))+
@@ -1443,16 +1484,18 @@ gb %>%
   coord_map()+
   geom_point(
     data=ied %>% arrange(abs(erate)),
-    aes(x=long,y=lat,color=erate,size=erate),
-    alpha=0.25
+    aes(x=long,y=lat,color=erate,alpha=abs(erate)),
+    size=1
     )+
-  scale_size_area(max_size=2)+
-  lims(y=c(50,55.5))+
+  # scale_size_area(max_size=2)+
+  guides(alpha=FALSE)+
   scale_color_gradient2(mid="gray90")+
   labs(title="differences in predicted export rates",
     color=expression(Delta~i),
-    size=expression(Delta~i))+
-  facet_wrap(~m1+m2,nrow=1)
+    size=expression(Delta~i),
+    x="",y="")+
+  facet_wrap(~m1+m2,nrow=2)+
+  theme(axis.text=element_blank())
 
 ```
 
