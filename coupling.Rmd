@@ -1499,6 +1499,14 @@ gb %>%
 
 ```
 
+```{r}
+imp$ext=log(ext[,2]/(1-ext[,2]))
+imp$ext[!is.finite(imp$ext)]=NA
+imp$resext=NA
+imp$resext[is.finite(imp$ext)]=resid(lm(imp$ext~I(log(imp$N))))
+cor(imp[,c(1:4, 8:9)], use="pairwise")
+```
+
 # Next steps
 
 1. Debug loglikelihood for Xia and gravity models
