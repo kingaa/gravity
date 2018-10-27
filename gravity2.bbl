@@ -1,0 +1,205 @@
+\begin{thebibliography}{}
+
+\bibitem[Bartlett, 1956]{bartlett1956deterministic}
+Bartlett, M. (1956).
+\newblock Deterministic and stochastic models for recurrent epidemics.
+\newblock In {\em Proceedings of the third Berkeley symposium on mathematical
+  statistics and probability}, volume~4, page 109.
+
+\bibitem[Bartlett, 1960]{bartlett1960critical}
+Bartlett, M. (1960).
+\newblock The critical community size for measles in the united states.
+\newblock {\em Journal of the Royal Statistical Society. Series A (General)},
+  pages 37--44.
+
+\bibitem[Bartlett, 1957]{bartlett1957measles}
+Bartlett, M.~S. (1957).
+\newblock Measles periodicity and community size.
+\newblock {\em Journal of the Royal Statistical Society. Series A (General)},
+  120(1):48--70.
+
+\bibitem[Bj{\o}rnstad et~al., 2002]{bjornstad2002dynamics}
+Bj{\o}rnstad, O.~N., Finkenst{\"a}dt, B.~F., and Grenfell, B.~T. (2002).
+\newblock Dynamics of measles epidemics: estimating scaling of transmission
+  rates using a time series sir model.
+\newblock {\em Ecological Monographs}, 72(2):169--184.
+
+\bibitem[Bj{\o}rnstad and Grenfell, 2008]{bjornstad2008hazards}
+Bj{\o}rnstad, O.~N. and Grenfell, B.~T. (2008).
+\newblock Hazards, spatial transmission and timing of outbreaks in epidemic
+  metapopulations.
+\newblock {\em Environmental and Ecological Statistics}, 15(3):265--277.
+
+\bibitem[Bobashev et~al., 2000]{bobashev2000reconstructing}
+Bobashev, G.~V., Ellner, S.~P., Nychka, D.~W., and Grenfell, B.~T. (2000).
+\newblock Reconstructing susceptible and recruitment dynamics from measles
+  epidemic data.
+\newblock {\em Mathematical Population Studies}, 8(1):1--29.
+
+\bibitem[Burnham and Anderson, 2003]{burnham2003model}
+Burnham, K.~P. and Anderson, D.~R. (2003).
+\newblock {\em Model selection and multimodel inference: a practical
+  information-theoretic approach}.
+\newblock Springer Science \& Business Media.
+
+\bibitem[Charu et~al., 2017]{charu2017human}
+Charu, V., Zeger, S., Gog, J., Bj{\o}rnstad, O.~N., Kissler, S., Simonsen, L.,
+  Grenfell, B.~T., and Viboud, C. (2017).
+\newblock Human mobility and the spatial transmission of influenza in the
+  united states.
+\newblock {\em PLOS Computational Biology}, 13(2):e1005382.
+
+\bibitem[Clarkson and Fine, 1985]{clarkson1985efficiency}
+Clarkson, J. and Fine, P.~E. (1985).
+\newblock The efficiency of measles and pertussis notification in england and
+  wales.
+\newblock {\em International journal of epidemiology}, 14(1):153--168.
+
+\bibitem[Erlander and Stewart, 1990]{erlander1990gravity}
+Erlander, S. and Stewart, N.~F. (1990).
+\newblock {\em The gravity model in transportation analysis: theory and
+  extensions}, volume~3.
+\newblock Vsp.
+
+\bibitem[Finkenst{\"a}dt et~al., 2002]{finkenstadt2002stochastic}
+Finkenst{\"a}dt, B.~F., Bj{\o}rnstad, O.~N., and Grenfell, B.~T. (2002).
+\newblock A stochastic model for extinction and recurrence of epidemics:
+  estimation and inference for measles outbreaks.
+\newblock {\em Biostatistics}, 3(4):493--510.
+
+\bibitem[Fotheringham, 1983]{fotheringham1983new}
+Fotheringham, A.~S. (1983).
+\newblock A new set of spatial-interaction models.
+\newblock In {\em Environment \& Planning A}, volume~15, pages 15--36.
+
+\bibitem[Fotheringham, 1984]{fotheringham1984spatial}
+Fotheringham, A.~S. (1984).
+\newblock Spatial flows and spatial patterns.
+\newblock {\em Environment and planning A}, 16(4):529--543.
+
+\bibitem[Glass et~al., 2003]{glass2003interpreting}
+Glass, K., Xia, Y., and Grenfell, B. (2003).
+\newblock Interpreting time-series analyses for continuous-time biological
+  models—measles as a case study.
+\newblock {\em Journal of Theoretical Biology}, 223(1):19--25.
+
+\bibitem[Gog et~al., 2014]{gog2014spatial}
+Gog, J.~R., Ballesteros, S., Viboud, C., Simonsen, L., Bjornstad, O.~N.,
+  Shaman, J., Chao, D.~L., Khan, F., and Grenfell, B.~T. (2014).
+\newblock Spatial transmission of 2009 pandemic influenza in the us.
+\newblock {\em PLoS Comput Biol}, 10(6):e1003635.
+
+\bibitem[Grenfell et~al., 2001]{grenfell2001travelling}
+Grenfell, B., Bj{\o}rnstad, O., and Kappey, J. (2001).
+\newblock Travelling waves and spatial hierarchies in measles epidemics.
+\newblock {\em Nature}, 414(6865):716--723.
+
+\bibitem[Grenfell and Harwood, 1997]{grenfellharwood1997}
+Grenfell, B. and Harwood, J. (1997).
+\newblock (meta)population dynamics of infectious diseases.
+\newblock {\em Trends in Ecology and Evolution}, 12(10):395--399.
+
+\bibitem[Haynes et~al., 1984]{haynes1984gravity}
+Haynes, K.~E., Fotheringham, A.~S., et~al. (1984).
+\newblock {\em Gravity and spatial interaction models}, volume~2.
+\newblock Sage Beverly Hills, CA.
+
+\bibitem[Hope-Simpson, 1952]{hopesimpson1952}
+Hope-Simpson, R. (1952).
+\newblock Infectiousness of communicable diseases in the household.
+\newblock {\em Lancet}, ii:549--554.
+
+\bibitem[Jandarov et~al., 2014]{jandarov2014emulating}
+Jandarov, R., Haran, M., Bj{\o}rnstad, O., and Grenfell, B. (2014).
+\newblock Emulating a gravity model to infer the spatiotemporal dynamics of an
+  infectious disease.
+\newblock {\em Journal of the Royal Statistical Society: Series C (Applied
+  Statistics)}, 63(3):423--444.
+
+\bibitem[Keeling et~al., 2004]{keelingetal2004}
+Keeling, M.~J., Bj{\o}rnstad, O.~N., and Grenfell, B.~T. (2004).
+\newblock Metapopulation dynamics of infectious diseases.
+\newblock In Hanski, I. and Gaggiotti, O., editors, {\em Ecology, Genetics, and
+  Evolution of Metapopulations}, pages 415--445. Elsevier, Amsterdam.
+
+\bibitem[Kraemer et~al., 2017]{kraemer2017spread}
+Kraemer, M.~U., Faria, N.~R., Reiner, R.~C., Golding, N., Nikolay, B., Stasse,
+  S., Johansson, M.~A., Salje, H., Faye, O., Wint, G.~W., et~al. (2017).
+\newblock Spread of yellow fever virus outbreak in angola and the democratic
+  republic of the congo 2015--16: a modelling study.
+\newblock {\em The Lancet Infectious Diseases}, 17(3):330--338.
+
+\bibitem[McCullagh and Nelder, 1989]{mccullaghnelder1989}
+McCullagh, P. and Nelder, J.~A. (1989).
+\newblock {\em Generalized Linear models}, volume~37 of {\em Monographs on
+  statistics and applied probability}.
+\newblock Chapman and Hall, London, 2nd edition.
+
+\bibitem[Merler and Ajelli, 2010]{merler2010role}
+Merler, S. and Ajelli, M. (2010).
+\newblock The role of population heterogeneity and human mobility in the spread
+  of pandemic influenza.
+\newblock {\em Proceedings of the Royal Society of London B: Biological
+  Sciences}, 277(1681):557--565.
+
+\bibitem[Murray and Cliff, 1977]{murray1977stochastic}
+Murray, G. and Cliff, A.~D. (1977).
+\newblock A stochastic model for measles epidemics in a multi-region setting.
+\newblock {\em Transactions of the Institute of British Geographers}, pages
+  158--174.
+
+\bibitem[Noulas et~al., 2012]{noulas2012tale}
+Noulas, A., Scellato, S., Lambiotte, R., Pontil, M., and Mascolo, C. (2012).
+\newblock A tale of many cities: universal patterns in human urban mobility.
+\newblock {\em PloS one}, 7(5):e37027.
+
+\bibitem[Pitzer et~al., 2009]{pitzer2009demographic}
+Pitzer, V.~E., Viboud, C., Simonsen, L., Steiner, C., Panozzo, C.~A., Alonso,
+  W.~J., Miller, M.~A., Glass, R.~I., Glasser, J.~W., Parashar, U.~D., et~al.
+  (2009).
+\newblock Demographic variability, vaccination, and the spatiotemporal dynamics
+  of rotavirus epidemics.
+\newblock {\em Science}, 325(5938):290--294.
+
+\bibitem[Simini et~al., 2012]{simini2012universal}
+Simini, F., Gonz{\'a}lez, M.~C., Maritan, A., and Barab{\'a}si, A.-L. (2012).
+\newblock A universal model for mobility and migration patterns.
+\newblock {\em Nature}, 484(7392):96--100.
+
+\bibitem[Stouffer, 1940]{stouffer1940intervening}
+Stouffer, S.~A. (1940).
+\newblock Intervening opportunities: a theory relating mobility and distance.
+\newblock {\em American sociological review}, 5(6):845--867.
+
+\bibitem[Tizzoni et~al., 2014]{tizzoni2014use}
+Tizzoni, M., Bajardi, P., Decuyper, A., King, G. K.~K., Schneider, C.~M.,
+  Blondel, V., Smoreda, Z., Gonz{\'a}lez, M.~C., and Colizza, V. (2014).
+\newblock On the use of human mobility proxies for modeling epidemics.
+\newblock {\em PLoS Comput Biol}, 10(7):e1003716.
+
+\bibitem[Truscott and Ferguson, 2012]{truscott2012evaluating}
+Truscott, J. and Ferguson, N.~M. (2012).
+\newblock Evaluating the adequacy of gravity models as a description of human
+  mobility for epidemic modelling.
+\newblock {\em PLoS Comput Biol}, 8(10):e1002699.
+
+\bibitem[Tuite et~al., 2011]{tuite2011cholera}
+Tuite, A.~R., Tien, J., Eisenberg, M., Earn, D.~J., Ma, J., and Fisman, D.~N.
+  (2011).
+\newblock Cholera epidemic in haiti, 2010: using a transmission model to
+  explain spatial spread of disease and identify optimal control interventions.
+\newblock {\em Annals of internal medicine}, 154(9):593--601.
+
+\bibitem[Viboud et~al., 2006]{viboud2006synchrony}
+Viboud, C., Bj{\o}rnstad, O.~N., Smith, D.~L., Simonsen, L., Miller, M.~A., and
+  Grenfell, B.~T. (2006).
+\newblock Synchrony, waves, and spatial hierarchies in the spread of influenza.
+\newblock {\em science}, 312(5772):447--451.
+
+\bibitem[Xia et~al., 2004]{xia2004measles}
+Xia, Y., Bj{\o}rnstad, O.~N., and Grenfell, B.~T. (2004).
+\newblock Measles metapopulation dynamics: a gravity model for epidemiological
+  coupling and dynamics.
+\newblock {\em The American Naturalist}, 164(2):267--281.
+
+\end{thebibliography}
