@@ -6,7 +6,7 @@ params:
 output:
   html_document:
     code_folding: show
-    df_print: kable
+    df_print: paged
     highlight: tango
     dev: png
     number_sections: no
@@ -15,11 +15,6 @@ output:
     toc_float:
       collapsed: no
       smooth_scroll: yes
-  pdf_document:
-    toc: yes
-    toc_depth: 2
-    dev: png
-    df_print: kable
 bibliography: gravity.bib
 ---
 
@@ -86,7 +81,7 @@ library(foreach)
 library(iterators)
 library(bbmle)
 library(nloptr)
-library(pomp)
+library(pomp2)
 library(ggplot2)
 theme_set(theme_bw())
 library(doMC)
@@ -98,24 +93,26 @@ registerDoMC()
 Retrieve the data from the database.
 
 ```{r clean-data,eval=TRUE,purl=TRUE}
-library(aakmisc)
-
-startTunnel()
-
-getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
-
-getQuery("select town,date,cases from measles where year>=1944 order by town,date") %>%
-  mutate(year=as.integer(format(date+3,"%Y"))) %>%
-  ddply(~town+year,mutate,week=seq_along(year),biweek=(week+1)%/%2) %>%
-  subset(week<=52,select=-c(date,week)) %>%
-  acast(town~year~biweek,value.var="cases",fun.aggregate=sum) %>%
-  melt(varnames=c("town","year","biweek"),value.name="cases") %>%
-  mutate(town=as.character(town)) %>%
-  arrange(town,year,biweek) %>%
-  join(demog,by=c("town","year")) %>%
-  mutate(births=births/26) -> dat
-
-stopTunnel()
+stew(file="clean_data.rda",{
+  library(aakmisc)
+  
+  startTunnel()
+  
+  getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
+  
+  getQuery("select town,date,cases from measles where year>=1944 order by town,date") %>%
+    mutate(year=as.integer(format(date+3,"%Y"))) %>%
+    ddply(~town+year,mutate,week=seq_along(year),biweek=(week+1)%/%2) %>%
+    subset(week<=52,select=-c(date,week)) %>%
+    acast(town~year~biweek,value.var="cases",fun.aggregate=sum) %>%
+    melt(varnames=c("town","year","biweek"),value.name="cases") %>%
+    mutate(town=as.character(town)) %>%
+    arrange(town,year,biweek) %>%
+    join(demog,by=c("town","year")) %>%
+    mutate(births=births/26) -> dat
+  
+  stopTunnel()
+})
 ```
 
 In the above:
@@ -147,6 +144,14 @@ bake(file="distances.rds",{
 ```
 
 ## Apply TSIR model to the individual towns.
+
+```{r startMPI,cache=FALSE,include=FALSE,purl=TRUE}
+if (file.exists("CLUSTER")) {
+  scan("CLUSTER",what=integer(0)) -> ncpu
+  library(doMPI)
+  cl <- startMPIcluster(ncpu,verbose=TRUE)
+}
+```
 
 ### Susceptible reconstruction.
 
@@ -659,6 +664,8 @@ results %<>%
   ldply() %>%
   mutate(rho=exp(rho),theta=exp(theta),psi=exp(psi),phi=exp(phi))
 
+results %>% count(~conv)
+
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
     fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
@@ -674,6 +681,313 @@ pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik)-10000,cex=0.5)
 ```
+
+# The mean field model
+
+By setting $\rho = 0$ in the gravity model, we obtain mean-field model.
+
+
+The negative log likelihood function for the mean-field model is:
+```{r meanfield-like,purl=TRUE}
+likfnMeanField <- function (theta, phi, psi, tau1, tau2) {
+  theta <- exp(theta)
+  phi <- exp(phi)
+  Q <- (N^tau2)*dd
+  iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
+}
+```
+
+Now we'll do a likelihood profile over $\tau_1$ and $\tau_2$.
+
+```{r meanfield-profile-2D,cache=FALSE,purl=TRUE}
+bake(file="meanfield.rds",{
+
+  registerDoMPI(cl)
+  
+  grd <- profileDesign(
+    tau1=seq(0.1, 1.4, length=25),
+    tau2=seq(-1, 1, length=25),
+    lower=c(psi=log(5),theta=log(1e-8),phi=log(1e-6)),
+    upper=c(psi=log(7),theta=log(1),phi=log(1e-2)),
+    nprof=10
+  )
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau1","tau2")
+      formals(likfnMeanField) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnMeanField,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1000,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> results
+  
+  results %>%
+    extract(sapply(results,inherits,"try-error")) %>%
+    sapply(as.character) %>%
+    unique() %>%
+    print()
+  
+  results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    ddply(~tau1+tau2,subset,loglik==max(loglik,na.rm=TRUE)) -> grd
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau1","tau2")
+      formals(likfnMeanField) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnMeanField,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1e-5,
+          xtol_rel=1e-7,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> results
+  
+  registerDoMC()
+  
+  attr(results,"nproc") <- getDoParWorkers()
+  results
+  
+}) -> results
+```
+
+The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster.
+Now we refine to obtain the global MLE.
+
+```{r meanfield-mle,cache=FALSE}
+bake("meanfield-mle.rds",{
+  
+  results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    subset(loglik==max(loglik),select=-c(loglik,conv)) -> start
+  
+  mle2(likfnMeanField,
+    method="Nelder-Mead",
+    start=as.list(start),
+    control=list(trace=0,maxit=10000),
+    skip.hessian=TRUE) -> fit
+  
+  c(coef(fit),loglik=as.numeric(logLik(fit)),
+    conv=fit@details$convergence) %>%
+    as.list() %>%
+    as.data.frame() -> mle
+}) -> mle.meanfield
+```
+
+```{r meanfield-results}
+results %>%
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
+
+results %<>%
+  extract(!sapply(results,inherits,"try-error")) %>%
+  ldply() %>%
+  mutate(theta=exp(theta),psi=exp(psi),phi=exp(phi))
+
+results %>% count(~conv)
+
+results %>%
+  ggplot(aes(x=tau1,y=tau2,z=loglik,
+    fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
+  geom_tile(color=NA)+geom_contour(bins=100,color='white')+
+  geom_point(color='red',shape="x",size=3,data=mle.meanfield)+
+  geom_hline(color='red',size=0.2,linetype=2,data=mle.meanfield,aes(yintercept=tau2))+
+  geom_vline(color='red',size=0.2,linetype=2,data=mle.meanfield,aes(xintercept=tau1))+
+  labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
+```
+
+```{r meanfield-pairsplot,fig.height=6.83}
+pairs(~loglik+theta+phi+psi+tau1+tau2,
+  data=results,
+  subset=loglik>max(loglik)-10000,cex=0.5)
+```
+
+
+# Diffusion model
+
+By setting $\tau_1 = \tau_2 = 0$ in the gravity model, we obtain a diffusion model, which couples cities in a way that depends on ly on the distance between them.
+
+The negative log likelihood function for the diffusion model is:
+```{r diffusion-like,purl=TRUE}
+likfnDiffusion <- function (theta, phi, rho, psi) {
+  theta <- exp(theta)
+  phi <- exp(phi)
+  rho <- exp(rho)
+  Q <- dd^rho
+  iota <- (theta*crossprod(Q,ylag)+phi)
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
+}
+```
+
+Now we'll do a likelihood profile over $\tau_1$ and $\tau_2$.
+
+```{r diffusion-profile-2D,cache=FALSE,purl=TRUE}
+bake(file="diffusion.rds",{
+
+  registerDoMPI(cl)
+  
+  grd <- profileDesign(
+    rho = seq(log(1),log(3),length=50),
+    lower=c(psi=log(5),theta=log(1e-8),phi=log(1e-6)),
+    upper=c(psi=log(7),theta=log(1),phi=log(1e-2)),
+    nprof=10
+  )
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("rho")
+      formals(likfnDiffusion) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnDiffusion,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1000,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> results
+  
+  results %>%
+    extract(sapply(results,inherits,"try-error")) %>%
+    sapply(as.character) %>%
+    unique() %>%
+    print()
+  
+  results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    ddply(~rho,subset,loglik==max(loglik,na.rm=TRUE)) -> grd
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("rho")
+      formals(likfnDiffusion) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnDiffusion,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1e-5,
+          xtol_rel=1e-7,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> results
+  
+  registerDoMC()
+  
+  attr(results,"nproc") <- getDoParWorkers()
+  results
+  
+}) -> results
+```
+
+The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster.
+Now we refine to obtain the global MLE.
+
+```{r diffusion-mle,cache=FALSE}
+bake("diffusion-mle.rds",{
+  
+  results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply() %>%
+    subset(loglik==max(loglik),select=-c(loglik,conv)) -> start
+  
+  mle2(likfnDiffusion,
+    method="Nelder-Mead",
+    start=as.list(start),
+    control=list(trace=0,maxit=10000),
+    skip.hessian=TRUE) -> fit
+  
+  c(coef(fit),loglik=as.numeric(logLik(fit)),
+    conv=fit@details$convergence) %>%
+    as.list() %>%
+    as.data.frame() -> mle
+}) -> mle.diffusion
+```
+
+```{r diffusion-results}
+results %>%
+  extract(sapply(results,inherits,"try-error")) %>%
+  sapply(as.character) %>%
+  unique()
+
+results %<>%
+  extract(!sapply(results,inherits,"try-error")) %>%
+  ldply() %>%
+  mutate(theta=exp(theta),psi=exp(psi),phi=exp(phi),rho=exp(rho))
+
+results %>% count(~conv)
+
+results %>%
+  ggplot(aes(x=rho,y=loglik))+
+  geom_point()+
+  labs(x=expression(rho),y=expression(log(L)))
+```
+
+```{r diffusion-pairsplot,fig.height=6.83}
+pairs(~loglik+theta+phi+psi+rho,
+  data=results,
+  subset=loglik>max(loglik)-10000,cex=0.5)
+```
+
 
 # Competing destinations model
 
@@ -821,6 +1135,8 @@ results %<>%
   ldply() %>%
   mutate(rho=exp(rho),theta=exp(theta),psi=exp(psi),phi=exp(phi))
 
+results %>% count(~conv)
+
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
     fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
@@ -941,6 +1257,8 @@ results %<>%
   subset(is.finite(loglik)) %>%
   mutate(theta=exp(theta),psi=exp(psi),phi=exp(phi))
 
+results %>% count(~conv)
+
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
     fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
@@ -1058,6 +1376,8 @@ results %<>%
   extract(!sapply(results,inherits,"try-error")) %>%
   ldply() %>%
   subset(is.finite(loglik))
+
+results %>% count(~conv)
 
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
@@ -1198,6 +1518,35 @@ summaryXia <- function (mle) {
     cbind(mle)
 }
 
+summaryMeanField <- function (mle) {
+  npar <- 5
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    Q <- (N^tau2)*dd
+    iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>%
+    cbind(mle)
+}
+
+summaryDiffusion <- function (mle) {
+  npar <- 4
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    rho <- exp(rho)
+    Q <- (dd^rho)
+    iota <- (theta*crossprod(Q,ylag)+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>%
+    cbind(mle)
+}
+
 summaryCompDest <- function (mle) {
   npar <- 7
   mle %$% {
@@ -1270,6 +1619,8 @@ summaryRadiation1 <- function (mle) {
 
 mle.grav %<>% summaryGravity()
 mle.xia %<>% summaryXia()
+mle.meanfield %<>% summaryMeanField()
+mle.diffusion %<>% summaryDiffusion()
 mle.compdest %<>% summaryCompDest()
 mle.stouffer %<>% summaryStouffer()
 mle.stouffer1 %<>% summaryStouffer1()
@@ -1279,6 +1630,8 @@ mle.radiation1 %<>% summaryRadiation1()
 list(
   gravity=mle.grav,
   xia=mle.xia,
+  meanfield=mle.meanfield,
+  diffusion=mle.diffusion,
   comp.dest=mle.compdest,
   stouffer=mle.stouffer,
   stouffer.variant=mle.stouffer1,
@@ -1297,7 +1650,6 @@ list(
 
 # Diagnostics
 
-To study whether better statistical fit translates to meaningful improvement on prediction on incidence we can look at CCS patterns:
 
 We can predict importation rates from fitted models
 
@@ -1392,6 +1744,8 @@ data.frame(
 ```
 
 ```{r}
+library(aakmisc)
+
 startTunnel()
 getQuery("select * from coords") %>% arrange(town) -> coords
 stopTunnel()
@@ -1410,8 +1764,11 @@ spatial.plot(imp$long, imp$lat, imp$CD-imp$GR, main="CD-GR", ctr=FALSE)
 spatial.plot(imp$long, imp$lat, imp$CD-imp$SV, main="CD-SV", ctr=FALSE)
 ```
 
+
 ```{r maps,message=FALSE,results="hide"}
 library(rgdal)
+library(aakmisc)
+
 readOGR("EngWal.shp") -> gb
 
 data.frame(
@@ -1456,106 +1813,306 @@ impexp %>%
     m2=ordered(m2,levels=c("GR","ST","CD","SV"))
   ) %>%
   dplyr::filter(m1 > m2) %>% 
-  tidyr::spread(variable,value) %>%
   dplyr::left_join(coords,by="town") -> ied
 
-gb %>% 
+foreach (m1=1:4) %:%
+  foreach (m2=1:4) %do% {
+    if (m1 > m2) {
+      model1 <- c("GR","ST","CD","SV")[m1]
+      model2 <- c("GR","ST","CD","SV")[m2]
+      ied %>%
+        dplyr::filter(m1==model1&m2==model2) %>%
+        arrange(variable,abs(value)) -> d
+      gb %>%
+        ggplot(aes(x=long,y=lat))+
+        geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+        coord_map()+
+        geom_point(
+          data=d,
+          # aes(x=long,y=lat,color=value,alpha=abs(value)),
+          aes(x=long,y=lat,color=sign(value)*(abs(value)^(1/4))),
+          size=1
+        )+
+        # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
+        guides(alpha=FALSE)+
+        scale_color_gradient2(mid="gray90")+
+        labs(title="differences in predicted import rates",
+          subtitle=sprintf("%s - %s",model1,model2),
+          x="",y="")+
+        facet_wrap(~variable,nrow=1)+
+        theme(axis.text=element_blank()) -> pl
+    } else {
+      list()
+    }
+  } %>% 
+  c()
+
+```
+
+```{r likes}
+dat %>% acast(town~year+biweek,value.var="cases") -> obs1
+
+likGravity <- function (mle) {
+  npar <- 6
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    rho <- exp(rho)
+    Q <- (N^tau2)*(dd^rho)
+    iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    ll <- dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE)
+    rv <- array(0,dim=dim(iota),dimnames=dimnames(iota))
+    rv[relevant] <- ll
+    rowSums(rv)
+  }
+}
+
+likCompDest <- function (mle) {
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    rho <- exp(rho)
+    Q <- (N^tau2)*(dd^rho)
+    R <- crossprod(Q,iii)^delta
+    iota <- (N^tau1)*(theta*crossprod(Q*R,ylag)+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    ll <- dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE)
+    rv <- array(0,dim=dim(iota),dimnames=dimnames(iota))
+    rv[relevant] <- ll
+    rowSums(rv)
+  }
+}
+
+likStouffer1 <- function (mle) {
+  readRDS("rankmat1.rds") -> rr
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    iota <- (N^tau1)*(theta*(rr^tau2)%*%ylag+phi)
+    lambda <- betaS*iota[relevant]^alpha
+    ll <- dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE)
+    rv <- array(0,dim=dim(iota),dimnames=dimnames(iota))
+    rv[relevant] <- ll
+    rowSums(rv)
+  }
+}
+
+data.frame(
+  SV=likStouffer1(mle.stouffer1),
+  GR=likGravity(mle.grav),
+  CD=likCompDest(mle.compdest),
+  N=N,
+  coords
+) -> spatialLiks
+
+spatialLiks %>% name_rows() %>% dplyr::filter(town!=.rownames) %>% nrow() 
+
+gb %>%
   ggplot(aes(x=long,y=lat))+
   geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
   coord_map()+
   geom_point(
-    data=ied %>% arrange(abs(irate)),
-    aes(x=long,y=lat,color=irate,alpha=abs(irate)),
+    data=spatialLiks,
+    aes(x=long,y=lat,color=SV-CD,alpha=abs(SV-CD)),
     size=1
-    )+
-  # scale_size_area(max_size=2)+
+  )+
+  # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
   guides(alpha=FALSE)+
   scale_color_gradient2(mid="gray90")+
-  labs(title="differences in predicted import rates",
-    color=expression(Delta~i),
-    size=expression(Delta~i),
+  labs(title="differences in log likelihood",
+    subtitle=sprintf("SV - CD"),
     x="",y="")+
-  facet_wrap(~m1+m2,nrow=2)+
   theme(axis.text=element_blank())
 
-gb %>% 
+gb %>%
   ggplot(aes(x=long,y=lat))+
   geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
   coord_map()+
   geom_point(
-    data=ied %>% arrange(abs(erate)),
-    aes(x=long,y=lat,color=erate,alpha=abs(erate)),
+    data=spatialLiks,
+    aes(x=long,y=lat,color=CD-GR,alpha=abs(CD-GR)),
     size=1
-    )+
-  # scale_size_area(max_size=2)+
+  )+
+  # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
   guides(alpha=FALSE)+
   scale_color_gradient2(mid="gray90")+
-  labs(title="differences in predicted export rates",
-    color=expression(Delta~i),
-    size=expression(Delta~i),
+  labs(title="differences in log likelihood",
+    subtitle=sprintf("CD - GR"),
     x="",y="")+
-  facet_wrap(~m1+m2,nrow=2)+
   theme(axis.text=element_blank())
 
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map()+
+  geom_point(
+    data=spatialLiks,
+    aes(x=long,y=lat,color=SV-GR,alpha=abs(SV-GR)),
+    size=1
+  )+
+  # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
+  guides(alpha=FALSE)+
+  scale_color_gradient2(mid="gray90")+
+  labs(title="differences in log likelihood",
+    subtitle=sprintf("SV - GR"),
+    x="",y="")+
+  theme(axis.text=element_blank())
 ```
 
-```{r}
-imp$ext=log(ext[,2]/(1-ext[,2]))
-imp$ext[!is.finite(imp$ext)]=NA
-imp$resext=NA
-imp$resext[is.finite(imp$ext)]=resid(lm(imp$ext~I(log(imp$N))))
-cor(imp[,c(1:4, 8:9)], use="pairwise")
+```{r network,purl=TRUE,cache=FALSE,eval=FALSE}
+list(
+  SV=melt(SVmat),
+  ST=melt(STmat),
+  GR=melt(GRmat),
+  CD=melt(CDmat)
+) %>% 
+  ldply() %>% 
+  dplyr::rename(model=.id,dest=Var1,src=Var2) %>% 
+  dplyr::filter(dest!=src) %>%
+  dplyr::left_join(
+           coords,
+           by=c("src"="town")
+         ) %>%
+  dplyr::rename(src.lat=lat,src.long=long) %>%
+  dplyr::left_join(
+           coords %>% mutate(N=N[town]),
+           by=c("dest"="town")
+         ) %>%
+  dplyr::rename(dest.lat=lat,dest.long=long) -> mats
+
+mats %>%
+  dplyr::filter(model=="SV") %>%
+  dplyr::group_by(dest) %>%
+  dplyr::filter(rank(-value)<=100) %>%
+  dplyr::ungroup() -> matslim
+
+library(gganimate)
+
+gb %>%
+  ggplot()+
+  geom_segment(
+    data=matslim,
+    mapping=aes(
+      x=src.long,y=src.lat,
+      xend=dest.long,yend=dest.lat,
+      color=log10(value)
+    )
+  )+
+  transition_states(N,transition_length=0.1,state_length=0.2)+
+#  guides(color=FALSE)+
+  expand_limits(color=c(0,log10(3.27e4)))+
+  geom_map(aes(x=long,y=lat,map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map()+
+  labs(x="",y="",title="Stouffer variant model",subtitle="{closest_state}")+
+  theme(axis.text=element_blank()) -> pls
+
+animate(pls,nframes=10000)
+
 ```
+
+```{bash,results="hide",eval=FALSE}
+ffmpeg -y -r 5 -i figure/coupling-network-1.gif network.webm
+ffmpeg -y -r 5 -i figure/coupling-network-1.gif network.mp4
+```
+
+<video controls style="width:100%;">
+	<source src="network.webm" type="video/webm"/>
+	<source src="network.mp4" type="video/mp4"/>
+	Your browser does not support the video element.
+</video>
+
 
 # Next steps
 
-1. Debug loglikelihood for Xia and gravity models
-2. Include intercept term to capture background
-1. Use negative binomial model
-3. Compare with "null" models (diffusion, independent)
-4. Model-model comparison of coupling matrices (which places are the strongest outliers) using likelihood residuals
+1. Compare with "null" models (diffusion, independent)
 
 Plots:
 
 1. empirical CCS plot with residuals (how well do models capture the residuals?)
 1. likelihood comparison maps
+1. import and export comparison maps
+1. network visualizations
 
-1. Expontial distance kernels
+1. Exponential distance kernels
 1. qAICs and qBayes-weights in table 
-1. Solve optimization issues
 1. Random effects.
-1. Zero-inflated or negative binomial model?
 1. Revisit $\sigma$ profile
 1. Revisit TSIR fitting (include residuals?)
 1. Include references for the various models.
 
-We next create the fade-out plot
+To study whether better statistical fit translates to meaningful improvement on prediction on incidence we can look at CCS patterns:
 
 ```{r fadeout-plot,fig.height=4.4}
 dat %>%
-  mutate(
-    E=cases==0,
-  ) %>%
   ddply(~town,summarize,
-    efrac=mean(E),
-    N=mean(pop)) %>%
+        efrac=(sum(cases==0)+0.5)/(length(cases)+0.5),
+        N=mean(pop)) -> fadeouts
+
+lm(qlogis(p=efrac)~log(N),data=fadeouts,subset=efrac>0) -> fit
+predict(fit,se.fit=TRUE) -> pfit
+
+fadeouts %>%
+  mutate(
+    pred=plogis(q=pfit$fit),
+    hi=plogis(q=pfit$fit+2*pfit$se.fit),
+    lo=plogis(q=fit$fit-2*pfit$se.fit)
+  ) -> fadeouts
+
+fadeouts %>%
   ggplot(aes(x=N,y=efrac))+
   geom_point()+
+  geom_line(aes(y=pred))+
+  geom_ribbon(aes(ymin=lo,ymax=hi),color="grey50",alpha=0.3)+
   scale_x_log10()+
   labs(y="proportion of zeros")
 
-dat %>%
-  mutate(
-    E=cases==0,
-  ) %>%
-  ddply(~town,summarize,
-    efrac=mean(E),
-    N=mean(pop)) %>%
+fadeouts %>%
   ggplot(aes(x=N,y=efrac))+
   geom_point()+
+  geom_line(aes(y=pred))+
+  geom_ribbon(aes(ymin=lo,ymax=hi),color="grey50",alpha=0.3)+
   scale_y_continuous(trans=logit_trans())+
   scale_x_log10()+
   labs(y="proportion of zeros")
+```
+
+```{r ccs-residuals,eval=FALSE}
+dat %>%
+  ddply(~town,summarize,
+    efrac=mean(cases==0),
+    N=mean(pop)) %>%
+  dplyr::filter(rank(-N)>6) %>% 
+  mutate(logit.ext=log(efrac/(1-efrac)))  -> dat1
+
+fit <- lm(logit.ext~log(N),data=dat1)
+dat1$resid <- residuals(fit)
+
+data.frame(
+  SV=SVmat %>% rowMeans(),
+  ST=STmat %>% rowMeans(),
+  GR=GRmat %>% rowMeans(),
+  CD=CDmat %>% rowMeans(),
+  long=coords$long,
+  lat=coords$lat
+) %>%
+  name_rows() %>%
+  dplyr::rename(town=.rownames) %>%
+  dplyr::left_join(dat1,by="town") -> dat1
+
+dat1 %>%
+  tidyr::gather(model,imports,SV,ST,GR,CD) %>%
+  ggplot(aes(x=imports,y=resid))+
+  geom_point()+
+  geom_smooth()+
+  scale_x_log10()+
+  facet_wrap(~model)
+
+imp$ext=log(ext[,2]/(1-ext[,2]))
+imp$ext[!is.finite(imp$ext)]=NA
+imp$resext=NA
+imp$resext[is.finite(imp$ext)]=resid(lm(imp$ext~I(log(imp$N))))
+cor(imp[,c(1:4, 8:9)], use="pairwise")
 ```
 
 # References
