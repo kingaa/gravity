@@ -1,4 +1,4 @@
-default: coupling.html flows2.html
+default: coupling.html
 
 %.html: %.Rmd
 	PATH=/usr/lib/rstudio/bin/pandoc:$$PATH \

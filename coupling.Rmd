@@ -1617,17 +1617,17 @@ summaryRadiation1 <- function (mle) {
     cbind(mle)
 }
 
-mle.grav %<>% summaryGravity()
-mle.xia %<>% summaryXia()
-mle.meanfield %<>% summaryMeanField()
-mle.diffusion %<>% summaryDiffusion()
-mle.compdest %<>% summaryCompDest()
-mle.stouffer %<>% summaryStouffer()
-mle.stouffer1 %<>% summaryStouffer1()
-mle.radiation %<>% summaryRadiation()
-mle.radiation1 %<>% summaryRadiation1()
+mle.grav %>% summaryGravity() -> mle.grav
+mle.xia %>% summaryXia() -> mle.xia
+mle.meanfield %>% summaryMeanField() -> mle.meanfield
+mle.diffusion %>% summaryDiffusion() -> mle.diffusion
+mle.compdest %>% summaryCompDest() -> mle.compdest
+mle.stouffer %>% summaryStouffer() -> mle.stouffer
+mle.stouffer1 %>% summaryStouffer1() -> mle.stouffer1
+mle.radiation %>% summaryRadiation() -> mle.radiation
+mle.radiation1 %>% summaryRadiation1() -> mle.radiation1
 
-list(
+dplyr::bind_rows(
   gravity=mle.grav,
   xia=mle.xia,
   meanfield=mle.meanfield,
@@ -1636,9 +1636,9 @@ list(
   stouffer=mle.stouffer,
   stouffer.variant=mle.stouffer1,
   radiation=mle.radiation,
-  radiation.variant=mle.radiation1
+  radiation.variant=mle.radiation1,
+  .id="model"
 ) %>%
-  ldply(.id="model") %>%
   arrange(-loglik) %>%
   mutate(rho=exp(rho),psi=exp(psi),qaic=-2*loglik/cHat[1]+2*npar,delta.qaic=qaic-min(qaic,na.rm=TRUE)) %>%
   subset(select=c(model,loglik,qaic,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi)) %>%
@@ -1744,13 +1744,16 @@ data.frame(
 ```
 
 ```{r}
-library(aakmisc)
+bake(file="coords.rds",{
+  library(aakmisc)
+  startTunnel()
+  getQuery("select * from coords") %>% arrange(town) -> coords
+  stopTunnel()
+  coords
+}) -> coords
 
-startTunnel()
-getQuery("select * from coords") %>% arrange(town) -> coords
-stopTunnel()
-
-imp=data.frame(
+```{r}
+imp <- data.frame(
   SV=SVmat %>% rowMeans(),
   ST=STmat %>% rowMeans(),
   GR=GRmat %>% rowMeans(),
@@ -1767,7 +1770,6 @@ spatial.plot(imp$long, imp$lat, imp$CD-imp$SV, main="CD-SV", ctr=FALSE)
 
 ```{r maps,message=FALSE,results="hide"}
 library(rgdal)
-library(aakmisc)
 
 readOGR("EngWal.shp") -> gb
 
@@ -1793,10 +1795,6 @@ data.frame(
   tidyr::spread(variable,value) %>%
   dplyr::arrange(-N,town,model) %>%
   dplyr::mutate(erate=export/N,irate=import/N) -> impexp
-
-startTunnel()
-getQuery("select * from coords") %>% arrange(town) -> coords
-stopTunnel()
 
 join(impexp,coords,by="town") -> impexp
 
