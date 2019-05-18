@@ -84,8 +84,6 @@ library(nloptr)
 library(pomp2)
 library(ggplot2)
 theme_set(theme_bw())
-library(doMC)
-registerDoMC()
 ```
 
 ## Preprocess the data.
@@ -150,6 +148,9 @@ if (file.exists("CLUSTER")) {
   scan("CLUSTER",what=integer(0)) -> ncpu
   library(doMPI)
   cl <- startMPIcluster(ncpu,verbose=TRUE)
+} else {
+  library(doMC)
+  registerDoMC()
 }
 ```
 
@@ -684,34 +685,30 @@ pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
 
 # The mean field model
 
-By setting $\rho = 0$ in the gravity model, we obtain mean-field model.
+By setting $\rho = 0$ and $\tau_1=\tau_2=1$ in the gravity model, we obtain mean-field model.
 
 
 The negative log likelihood function for the mean-field model is:
 ```{r meanfield-like,purl=TRUE}
-likfnMeanField <- function (theta, phi, psi, tau1, tau2) {
+likfnMeanField <- function (theta, phi, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
-  Q <- (N^tau2)*dd
-  iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
+  Q <- N*dd
+  iota <- N*(theta*crossprod(Q,ylag)+phi)
   lambda <- betaS*iota[relevant]^alpha
   -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
 ```
 
-Now we'll do a likelihood profile over $\tau_1$ and $\tau_2$.
+Now we find the MLE.
 
-```{r meanfield-profile-2D,cache=FALSE,purl=TRUE}
+```{r meanfield-optim,cache=FALSE,purl=TRUE}
 bake(file="meanfield.rds",{
 
-  registerDoMPI(cl)
-  
-  grd <- profileDesign(
-    tau1=seq(0.1, 1.4, length=25),
-    tau2=seq(-1, 1, length=25),
+  grd <- sobolDesign(
     lower=c(psi=log(5),theta=log(1e-8),phi=log(1e-6)),
     upper=c(psi=log(7),theta=log(1),phi=log(1e-2)),
-    nprof=10
+    nseq=250
   )
   
   foreach(start=iter(grd,"row"),
@@ -720,7 +717,7 @@ bake(file="meanfield.rds",{
     .packages=c("nloptr","magrittr")
   ) %dopar% try(
     {
-      fixed <- c("tau1","tau2")
+      fixed <- c()
       formals(likfnMeanField) %>% names() %>% setdiff(fixed) -> est
       nloptr(unlist(start[est]),
         function(x){
@@ -748,7 +745,7 @@ bake(file="meanfield.rds",{
   results %>%
     extract(!sapply(results,inherits,"try-error")) %>%
     ldply() %>%
-    ddply(~tau1+tau2,subset,loglik==max(loglik,na.rm=TRUE)) -> grd
+    subset(loglik==max(loglik,na.rm=TRUE)) -> grd
   
   foreach(start=iter(grd,"row"),
     .errorhandling="pass",
@@ -756,7 +753,7 @@ bake(file="meanfield.rds",{
     .packages=c("nloptr","magrittr")
   ) %dopar% try(
     {
-      fixed <- c("tau1","tau2")
+      fixed <- c()
       formals(likfnMeanField) %>% names() %>% setdiff(fixed) -> est
       nloptr(unlist(start[est]),
         function(x){
@@ -776,12 +773,18 @@ bake(file="meanfield.rds",{
     }
   ) -> results
   
-  registerDoMC()
-  
   attr(results,"nproc") <- getDoParWorkers()
   results
   
 }) -> results
+```
+
+```{r meanfield-pairsplot,fig.height=6.83}
+pairs(~loglik+theta+phi+psi,
+  data=results %>%
+    extract(!sapply(results,inherits,"try-error")) %>%
+    ldply(),
+  subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster.
@@ -820,27 +823,12 @@ results %<>%
   mutate(theta=exp(theta),psi=exp(psi),phi=exp(phi))
 
 results %>% count(~conv)
-
-results %>%
-  ggplot(aes(x=tau1,y=tau2,z=loglik,
-    fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
-  geom_tile(color=NA)+geom_contour(bins=100,color='white')+
-  geom_point(color='red',shape="x",size=3,data=mle.meanfield)+
-  geom_hline(color='red',size=0.2,linetype=2,data=mle.meanfield,aes(yintercept=tau2))+
-  geom_vline(color='red',size=0.2,linetype=2,data=mle.meanfield,aes(xintercept=tau1))+
-  labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
-```
-
-```{r meanfield-pairsplot,fig.height=6.83}
-pairs(~loglik+theta+phi+psi+tau1+tau2,
-  data=results,
-  subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
 
 # Diffusion model
 
-By setting $\tau_1 = \tau_2 = 0$ in the gravity model, we obtain a diffusion model, which couples cities in a way that depends on ly on the distance between them.
+By setting $\tau_1 = \tau_2 = 0$ in the gravity model, we obtain a diffusion model, which couples cities in a way that depends only on the distance between them.
 
 The negative log likelihood function for the diffusion model is:
 ```{r diffusion-like,purl=TRUE}
@@ -860,8 +848,6 @@ Now we'll do a likelihood profile over $\tau_1$ and $\tau_2$.
 ```{r diffusion-profile-2D,cache=FALSE,purl=TRUE}
 bake(file="diffusion.rds",{
 
-  registerDoMPI(cl)
-  
   grd <- profileDesign(
     rho = seq(log(1),log(3),length=50),
     lower=c(psi=log(5),theta=log(1e-8),phi=log(1e-6)),
@@ -930,8 +916,6 @@ bake(file="diffusion.rds",{
         cbind(conv=fit$status) -> res
     }
   ) -> results
-  
-  registerDoMC()
   
   attr(results,"nproc") <- getDoParWorkers()
   results
@@ -1523,8 +1507,8 @@ summaryMeanField <- function (mle) {
   mle %$% {
     theta <- exp(theta)
     phi <- exp(phi)
-    Q <- (N^tau2)*dd
-    iota <- (N^tau1)*(theta*crossprod(Q,ylag)+phi)
+    Q <- N*dd
+    iota <- N*(theta*crossprod(Q,ylag)+phi)
     lambda <- betaS*iota[relevant]^alpha
     var <- lambda+lambda*lambda*exp(psi)
     data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
@@ -1641,8 +1625,9 @@ dplyr::bind_rows(
 ) %>%
   arrange(-loglik) %>%
   mutate(rho=exp(rho),psi=exp(psi),qaic=-2*loglik/cHat[1]+2*npar,delta.qaic=qaic-min(qaic,na.rm=TRUE)) %>%
+  mutate(theta=theta/log(10),phi=phi/log(10)) %>%
   subset(select=c(model,loglik,qaic,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi)) %>%
-  rename(c(theta="$\\log{\\theta}$",cHat="$\\hat{c}$",phi="$\\log{\\phi}$",rho="$\\rho$",
+  rename(c(theta="$\\log_{10}{\\theta}$",cHat="$\\hat{c}$",phi="$\\log_{10}{\\phi}$",rho="$\\rho$",
     psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
     loglik="$\\ell$",qaic="QAIC",delta.qaic="$\\Delta\\!\\mathrm{QAIC}$")) %>%
   kable(digits=3)
