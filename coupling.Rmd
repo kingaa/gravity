@@ -5,7 +5,7 @@ params:
   prefix: "coupling"
 output:
   html_document:
-    code_folding: show
+    code_folding: hide
     df_print: paged
     highlight: tango
     dev: png
@@ -1736,20 +1736,6 @@ bake(file="coords.rds",{
   stopTunnel()
   coords
 }) -> coords
-
-```{r}
-imp <- data.frame(
-  SV=SVmat %>% rowMeans(),
-  ST=STmat %>% rowMeans(),
-  GR=GRmat %>% rowMeans(),
-  CD=CDmat %>% rowMeans(),
-  N=N,
-  long=coords$long,
-  lat=coords$lat
-)
-require(ncf)
-spatial.plot(imp$long, imp$lat, imp$CD-imp$GR, main="CD-GR", ctr=FALSE)
-spatial.plot(imp$long, imp$lat, imp$CD-imp$SV, main="CD-SV", ctr=FALSE)
 ```
 
 
@@ -1784,16 +1770,16 @@ data.frame(
 join(impexp,coords,by="town") -> impexp
 
 impexp %>%
-  dplyr::select(town,model,erate,irate) %>%
-  dplyr::filter(model %in% c("GR","ST","CD","SV")) %>%
-  tidyr::gather(variable,value,erate,irate) %>%
+  dplyr::select(town,model,export=erate,import=irate) %>%
+  dplyr::filter(model %in% c("RV","GR","CD","SV")) %>%
+  tidyr::gather(variable,value,export,import) %>%
   acast(model~town~variable,value.var="value") %>%
   aaply(c(2,3),function(x)outer(x,x,FUN="-")) %>%
   melt() %>%
   dplyr::rename(town=X1,variable=X2,m1=Var3,m2=Var4) %>% 
   mutate(
-    m1=ordered(m1,levels=c("GR","ST","CD","SV")),
-    m2=ordered(m2,levels=c("GR","ST","CD","SV"))
+    m1=ordered(m1,levels=c("RV","GR","CD","SV")),
+    m2=ordered(m2,levels=c("RV","GR","CD","SV"))
   ) %>%
   dplyr::filter(m1 > m2) %>% 
   dplyr::left_join(coords,by="town") -> ied
@@ -1801,8 +1787,8 @@ impexp %>%
 foreach (m1=1:4) %:%
   foreach (m2=1:4) %do% {
     if (m1 > m2) {
-      model1 <- c("GR","ST","CD","SV")[m1]
-      model2 <- c("GR","ST","CD","SV")[m2]
+      model1 <- c("RV","GR","CD","SV")[m1]
+      model2 <- c("RV","GR","CD","SV")[m2]
       ied %>%
         dplyr::filter(m1==model1&m2==model2) %>%
         arrange(variable,abs(value)) -> d
@@ -1813,13 +1799,13 @@ foreach (m1=1:4) %:%
         geom_point(
           data=d,
           # aes(x=long,y=lat,color=value,alpha=abs(value)),
-          aes(x=long,y=lat,color=sign(value)*(abs(value)^(1/4))),
+          aes(x=long,y=lat,color=value),
           size=1
         )+
         # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
         guides(alpha=FALSE)+
         scale_color_gradient2(mid="gray90")+
-        labs(title="differences in predicted import rates",
+        labs(title="differences in predicted import and export rates",
           subtitle=sprintf("%s - %s",model1,model2),
           x="",y="")+
         facet_wrap(~variable,nrow=1)+
@@ -1847,7 +1833,7 @@ likGravity <- function (mle) {
     ll <- dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE)
     rv <- array(0,dim=dim(iota),dimnames=dimnames(iota))
     rv[relevant] <- ll
-    rowSums(rv)
+    rowSums(rv)/rowSums(rv!=0)
   }
 }
 
@@ -1863,7 +1849,7 @@ likCompDest <- function (mle) {
     ll <- dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE)
     rv <- array(0,dim=dim(iota),dimnames=dimnames(iota))
     rv[relevant] <- ll
-    rowSums(rv)
+    rowSums(rv)/rowSums(rv!=0)
   }
 }
 
@@ -1877,7 +1863,7 @@ likStouffer1 <- function (mle) {
     ll <- dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE)
     rv <- array(0,dim=dim(iota),dimnames=dimnames(iota))
     rv[relevant] <- ll
-    rowSums(rv)
+    rowSums(rv)/rowSums(rv!=0)
   }
 }
 
@@ -1896,7 +1882,7 @@ gb %>%
   geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
   coord_map()+
   geom_point(
-    data=spatialLiks,
+    data=spatialLiks %>% dplyr::filter(N<5e4),
     aes(x=long,y=lat,color=SV-CD,alpha=abs(SV-CD)),
     size=1
   )+
