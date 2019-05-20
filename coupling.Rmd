@@ -124,14 +124,19 @@ In the above:
 
 Now let's compute the distances between the cities.
 
-```{r distances,eval=FALSE,purl=TRUE}
-bake(file="distances.rds",{
+```{r coords}
+bake(file="coords.rds",{
   library(aakmisc)
-  
   startTunnel()
   getQuery("select * from coords") %>% arrange(town) -> coords
   stopTunnel()
-  rownames(coords) <- coords$town
+  coords
+}) -> coords
+```
+
+```{r distances,eval=FALSE,purl=TRUE}
+bake(file="distances.rds",{
+  library(aakmisc)
   
   library(geosphere)
   distm(coords %>% subset(select=c(long,lat)),
@@ -1635,6 +1640,7 @@ dplyr::bind_rows(
 
 # Diagnostics
 
+## Import and export rates by population size
 
 We can predict importation rates from fitted models
 
@@ -1698,52 +1704,7 @@ mle.radiation1 %$% {
 } -> RVmat
 ```
 
-```{r import_export,fig.height=6.83}
-data.frame(
-  SV=SVmat %>% rowMeans(),
-  ST=STmat %>% rowMeans(),
-  GR=GRmat %>% rowMeans(),
-  CD=CDmat %>% rowMeans(),
-  RV=RVmat %>% rowMeans(),
-  RD=RDmat %>% rowMeans(),
-  N=N
-) %>% 
-  tidyr::gather(model,imports,-N) %>%
-  ggplot(aes(x=N,y=imports/N,color=model))+
-  geom_point(alpha=1)+scale_x_log10()+scale_y_log10()+
-  facet_grid(model~.)
-
-data.frame(
-  SV=SVmat %>% colMeans(),
-  ST=STmat %>% colMeans(),
-  GR=GRmat %>% colMeans(),
-  CD=CDmat %>% colMeans(),
-  RV=RVmat %>% colMeans(),
-  RD=RDmat %>% colMeans(),
-  N=N
-) %>% 
-  tidyr::gather(model,exports,-N) %>%
-  ggplot(aes(x=N,y=exports/N,color=model))+
-  geom_point(alpha=1)+scale_x_log10()+scale_y_log10()+
-  facet_grid(model~.)
-```
-
-```{r}
-bake(file="coords.rds",{
-  library(aakmisc)
-  startTunnel()
-  getQuery("select * from coords") %>% arrange(town) -> coords
-  stopTunnel()
-  coords
-}) -> coords
-```
-
-
-```{r maps,message=FALSE,results="hide"}
-library(rgdal)
-
-readOGR("EngWal.shp") -> gb
-
+```{r import_export}
 data.frame(
   SV_import=SVmat %>% rowMeans(),
   ST_import=STmat %>% rowMeans(),
@@ -1768,6 +1729,29 @@ data.frame(
   dplyr::mutate(erate=export/N,irate=import/N) -> impexp
 
 join(impexp,coords,by="town") -> impexp
+```
+
+```{r imp_exp_map,fig.height=6.83}
+impexp %>%
+  dplyr::select(town,N,model,export=erate,import=irate) %>%
+  dplyr::filter(model %in% c("SV","CD","GR","RV")) %>%
+  dplyr::mutate(
+           model=factor(model,levels=c("SV","CD","GR","RV"))
+         ) %>%
+  tidyr::gather(rate,value,import,export) %>%
+  ggplot(aes(x=N,y=value))+
+  geom_point(alpha=0.3)+
+  scale_x_log10()+
+  scale_y_log10()+
+  facet_grid(model~rate)
+```
+
+## Overall import and export rates
+
+```{r ratemaps,message=FALSE,results="hide"}
+library(rgdal)
+
+readOGR("EngWal.shp") -> gb
 
 impexp %>%
   dplyr::select(town,model,export=erate,import=irate) %>%
@@ -1784,41 +1768,41 @@ impexp %>%
   dplyr::filter(m1 > m2) %>% 
   dplyr::left_join(coords,by="town") -> ied
 
-foreach (m1=1:4) %:%
-  foreach (m2=1:4) %do% {
-    if (m1 > m2) {
-      model1 <- c("RV","GR","CD","SV")[m1]
-      model2 <- c("RV","GR","CD","SV")[m2]
-      ied %>%
-        dplyr::filter(m1==model1&m2==model2) %>%
-        arrange(variable,abs(value)) -> d
-      gb %>%
-        ggplot(aes(x=long,y=lat))+
-        geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-        coord_map()+
-        geom_point(
-          data=d,
-          # aes(x=long,y=lat,color=value,alpha=abs(value)),
-          aes(x=long,y=lat,color=value),
-          size=1
-        )+
-        # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
-        guides(alpha=FALSE)+
-        scale_color_gradient2(mid="gray90")+
-        labs(title="differences in predicted import and export rates",
-          subtitle=sprintf("%s - %s",model1,model2),
-          x="",y="")+
-        facet_wrap(~variable,nrow=1)+
-        theme(axis.text=element_blank()) -> pl
-    } else {
-      list()
-    }
-  } %>% 
-  c()
+expand.grid(m1=1:4,m2=1:4) %>%
+  dplyr::filter(m1<m2) %>%
+  dplyr::mutate(
+           model1=c("SV","CD","GR","RV")[m1],
+           model2=c("SV","CD","GR","RV")[m2]
+         ) -> comps
+           
+foreach (c=iter(comps,"row")) %do% {
+  ied %>%
+    dplyr::filter(m1==c$model1&m2==c$model2) %>%
+    arrange(variable,abs(value)) -> d
+  gb %>%
+    ggplot(aes(x=long,y=lat))+
+    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+    coord_map()+
+    geom_point(
+      data=d,
+      aes(x=long,y=lat,color=value),
+      size=1
+    )+
+    guides(alpha=FALSE)+
+    scale_color_gradient2(mid="gray90")+
+    labs(title="differences in predicted import and export rates",
+         subtitle=sprintf("%s - %s",c$model1,c$model2),
+         x="",y="")+
+    facet_wrap(~variable,nrow=1)+
+    theme(axis.text=element_blank()) -> pl
+} -> ratemaps
 
+print(ratemaps)
 ```
 
-```{r likes}
+## Likelihood differences
+
+```{r likmaps}
 dat %>% acast(town~year+biweek,value.var="cases") -> obs1
 
 likGravity <- function (mle) {
@@ -1886,7 +1870,6 @@ gb %>%
     aes(x=long,y=lat,color=SV-CD,alpha=abs(SV-CD)),
     size=1
   )+
-  # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
   guides(alpha=FALSE)+
   scale_color_gradient2(mid="gray90")+
   labs(title="differences in log likelihood",
@@ -1903,7 +1886,6 @@ gb %>%
     aes(x=long,y=lat,color=CD-GR,alpha=abs(CD-GR)),
     size=1
   )+
-  # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
   guides(alpha=FALSE)+
   scale_color_gradient2(mid="gray90")+
   labs(title="differences in log likelihood",
@@ -1920,7 +1902,6 @@ gb %>%
     aes(x=long,y=lat,color=SV-GR,alpha=abs(SV-GR)),
     size=1
   )+
-  # expand_limits(color=c(-0.0014,0.00073),alpha=c(0.0014))+
   guides(alpha=FALSE)+
   scale_color_gradient2(mid="gray90")+
   labs(title="differences in log likelihood",
