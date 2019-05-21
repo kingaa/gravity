@@ -1726,9 +1726,8 @@ data.frame(
   tidyr::separate(variable,into=c("model","variable")) %>%
   tidyr::spread(variable,value) %>%
   dplyr::arrange(-N,town,model) %>%
-  dplyr::mutate(erate=export/N,irate=import/N) -> impexp
-
-join(impexp,coords,by="town") -> impexp
+  dplyr::mutate(erate=export/N,irate=import/N) %>%
+  join(coords,by="town") -> impexp
 ```
 
 ```{r imp_exp_map,fig.height=6.83}
@@ -1740,7 +1739,7 @@ impexp %>%
          ) %>%
   tidyr::gather(rate,value,import,export) %>%
   ggplot(aes(x=N,y=value))+
-  geom_point(alpha=0.3)+
+  geom_point(alpha=0.3,size=0.1)+
   scale_x_log10()+
   scale_y_log10()+
   facet_grid(model~rate)
@@ -1768,7 +1767,7 @@ impexp %>%
   dplyr::filter(m1 > m2) %>% 
   dplyr::left_join(coords,by="town") -> ied
 
-expand.grid(m1=1:4,m2=1:4) %>%
+expand.grid(m2=1:4,m1=1:4) %>%
   dplyr::filter(m1<m2) %>%
   dplyr::mutate(
            model1=c("SV","CD","GR","RV")[m1],
@@ -1777,12 +1776,12 @@ expand.grid(m1=1:4,m2=1:4) %>%
            
 foreach (c=iter(comps,"row")) %do% {
   ied %>%
-    dplyr::filter(m1==c$model1&m2==c$model2) %>%
+    dplyr::filter(m1==c$model1 & m2==c$model2) %>%
     arrange(variable,abs(value)) -> d
   gb %>%
     ggplot(aes(x=long,y=lat))+
     geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-    coord_map()+
+    coord_map(projection="gilbert")+
     geom_point(
       data=d,
       aes(x=long,y=lat,color=value),
@@ -1790,9 +1789,9 @@ foreach (c=iter(comps,"row")) %do% {
     )+
     guides(alpha=FALSE)+
     scale_color_gradient2(mid="gray90")+
-    labs(title="differences in predicted import and export rates",
-         subtitle=sprintf("%s - %s",c$model1,c$model2),
-         x="",y="")+
+    labs(title="differences in predicted per capita import and export rates",
+      subtitle=sprintf("%s - %s",c$model1,c$model2),
+      color="",x="",y="")+
     facet_wrap(~variable,nrow=1)+
     theme(axis.text=element_blank()) -> pl
 } -> ratemaps
@@ -1802,7 +1801,7 @@ print(ratemaps)
 
 ## Likelihood differences
 
-```{r likmaps}
+```{r likmaps,results="hide"}
 dat %>% acast(town~year+biweek,value.var="cases") -> obs1
 
 likGravity <- function (mle) {
@@ -1851,147 +1850,74 @@ likStouffer1 <- function (mle) {
   }
 }
 
+likRadiation1 <- function (mle) {
+  readRDS("radmat1.rds") -> rr
+  mle %$% {
+    theta <- exp(theta)
+    iota <- theta*(rr%*%ylag)
+    lambda <- betaS*iota[relevant]^alpha
+    ll <- dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE)
+    rv <- array(0,dim=dim(iota),dimnames=dimnames(iota))
+    rv[relevant] <- ll
+    rowSums(rv)/rowSums(rv!=0)
+  }
+}
+
+poplim <- 1e5
+
 data.frame(
   SV=likStouffer1(mle.stouffer1),
-  GR=likGravity(mle.grav),
   CD=likCompDest(mle.compdest),
-  N=N,
-  coords
-) -> spatialLiks
+  GR=likGravity(mle.grav),
+  RV=likRadiation1(mle.radiation1),
+  N=N
+) %>%
+  name_rows() %>%
+  dplyr::rename(town=.rownames) %>%
+  dplyr::left_join(coords,by="town") %>%
+  dplyr::filter(N<poplim) %>%
+  tidyr::gather(model,value,-N,-town,-long,-lat) -> spatialLiks
 
-spatialLiks %>% name_rows() %>% dplyr::filter(town!=.rownames) %>% nrow() 
+expand.grid(m2=1:4,m1=1:4) %>%
+  dplyr::filter(m1<m2) %>%
+  dplyr::mutate(
+           model1=c("SV","CD","GR","RV")[m1],
+           model2=c("SV","CD","GR","RV")[m2]
+         ) -> comps
 
-gb %>%
-  ggplot(aes(x=long,y=lat))+
-  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-  coord_map()+
-  geom_point(
-    data=spatialLiks %>% dplyr::filter(N<5e4),
-    aes(x=long,y=lat,color=SV-CD,alpha=abs(SV-CD)),
-    size=1
-  )+
-  guides(alpha=FALSE)+
-  scale_color_gradient2(mid="gray90")+
-  labs(title="differences in log likelihood",
-    subtitle=sprintf("SV - CD"),
-    x="",y="")+
-  theme(axis.text=element_blank())
+foreach (c=iter(comps,"row")) %do% {
+  
+  spatialLiks %>% dplyr::filter(model==c$model1) -> d1
+  spatialLiks %>% dplyr::filter(model==c$model2) -> d2
+  dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+    suffix=c("_1","_2")) %>%
+    mutate(diff=value_1-value_2) -> dd
+  
+ gb %>%
+    ggplot(aes(x=long,y=lat))+
+    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+    coord_map(projection="gilbert")+
+    geom_point(
+      data=dd,
+      aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
+      size=1
+    )+
+   guides(alpha=FALSE)+
+   scale_color_gradient2(mid="gray90")+
+   labs(title="per datum differences in log likelihood",
+     subtitle=sprintf("%s - %s",c$model1,c$model2),
+     x="",y="",color="")+
+   theme(axis.text=element_blank()) -> pl
+ 
+} -> likmaps
 
-gb %>%
-  ggplot(aes(x=long,y=lat))+
-  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-  coord_map()+
-  geom_point(
-    data=spatialLiks,
-    aes(x=long,y=lat,color=CD-GR,alpha=abs(CD-GR)),
-    size=1
-  )+
-  guides(alpha=FALSE)+
-  scale_color_gradient2(mid="gray90")+
-  labs(title="differences in log likelihood",
-    subtitle=sprintf("CD - GR"),
-    x="",y="")+
-  theme(axis.text=element_blank())
-
-gb %>%
-  ggplot(aes(x=long,y=lat))+
-  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-  coord_map()+
-  geom_point(
-    data=spatialLiks,
-    aes(x=long,y=lat,color=SV-GR,alpha=abs(SV-GR)),
-    size=1
-  )+
-  guides(alpha=FALSE)+
-  scale_color_gradient2(mid="gray90")+
-  labs(title="differences in log likelihood",
-    subtitle=sprintf("SV - GR"),
-    x="",y="")+
-  theme(axis.text=element_blank())
-```
-
-```{r network,purl=TRUE,cache=FALSE,eval=FALSE}
-list(
-  SV=melt(SVmat),
-  ST=melt(STmat),
-  GR=melt(GRmat),
-  CD=melt(CDmat)
-) %>% 
-  ldply() %>% 
-  dplyr::rename(model=.id,dest=Var1,src=Var2) %>% 
-  dplyr::filter(dest!=src) %>%
-  dplyr::left_join(
-           coords,
-           by=c("src"="town")
-         ) %>%
-  dplyr::rename(src.lat=lat,src.long=long) %>%
-  dplyr::left_join(
-           coords %>% mutate(N=N[town]),
-           by=c("dest"="town")
-         ) %>%
-  dplyr::rename(dest.lat=lat,dest.long=long) -> mats
-
-mats %>%
-  dplyr::filter(model=="SV") %>%
-  dplyr::group_by(dest) %>%
-  dplyr::filter(rank(-value)<=100) %>%
-  dplyr::ungroup() -> matslim
-
-library(gganimate)
-
-gb %>%
-  ggplot()+
-  geom_segment(
-    data=matslim,
-    mapping=aes(
-      x=src.long,y=src.lat,
-      xend=dest.long,yend=dest.lat,
-      color=log10(value)
-    )
-  )+
-  transition_states(N,transition_length=0.1,state_length=0.2)+
-#  guides(color=FALSE)+
-  expand_limits(color=c(0,log10(3.27e4)))+
-  geom_map(aes(x=long,y=lat,map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-  coord_map()+
-  labs(x="",y="",title="Stouffer variant model",subtitle="{closest_state}")+
-  theme(axis.text=element_blank()) -> pls
-
-animate(pls,nframes=10000)
+print(likmaps)
 
 ```
 
-```{bash,results="hide",eval=FALSE}
-ffmpeg -y -r 5 -i figure/coupling-network-1.gif network.webm
-ffmpeg -y -r 5 -i figure/coupling-network-1.gif network.mp4
-```
+The above plots are limited to cities of less than $`r poplim`$ souls, since larger cities have few or no fadeouts.
 
-<video controls style="width:100%;">
-	<source src="network.webm" type="video/webm"/>
-	<source src="network.mp4" type="video/mp4"/>
-	Your browser does not support the video element.
-</video>
-
-
-# Next steps
-
-1. Compare with "null" models (diffusion, independent)
-
-Plots:
-
-1. empirical CCS plot with residuals (how well do models capture the residuals?)
-1. likelihood comparison maps
-1. import and export comparison maps
-1. network visualizations
-
-1. Exponential distance kernels
-1. qAICs and qBayes-weights in table 
-1. Random effects.
-1. Revisit $\sigma$ profile
-1. Revisit TSIR fitting (include residuals?)
-1. Include references for the various models.
-
-To study whether better statistical fit translates to meaningful improvement on prediction on incidence we can look at CCS patterns:
+## Fadeouts
 
 ```{r fadeout-plot,fig.height=4.4}
 dat %>%
@@ -2006,7 +1932,8 @@ fadeouts %>%
   mutate(
     pred=plogis(q=pfit$fit),
     hi=plogis(q=pfit$fit+2*pfit$se.fit),
-    lo=plogis(q=fit$fit-2*pfit$se.fit)
+    lo=plogis(q=fit$fit-2*pfit$se.fit),
+    residual=residuals(fit)
   ) -> fadeouts
 
 fadeouts %>%
@@ -2025,44 +1952,37 @@ fadeouts %>%
   scale_y_continuous(trans=logit_trans())+
   scale_x_log10()+
   labs(y="proportion of zeros")
-```
 
-```{r ccs-residuals,eval=FALSE}
-dat %>%
-  ddply(~town,summarize,
-    efrac=mean(cases==0),
-    N=mean(pop)) %>%
-  dplyr::filter(rank(-N)>6) %>% 
-  mutate(logit.ext=log(efrac/(1-efrac)))  -> dat1
-
-fit <- lm(logit.ext~log(N),data=dat1)
-dat1$resid <- residuals(fit)
-
-data.frame(
-  SV=SVmat %>% rowMeans(),
-  ST=STmat %>% rowMeans(),
-  GR=GRmat %>% rowMeans(),
-  CD=CDmat %>% rowMeans(),
-  long=coords$long,
-  lat=coords$lat
-) %>%
-  name_rows() %>%
-  dplyr::rename(town=.rownames) %>%
-  dplyr::left_join(dat1,by="town") -> dat1
-
-dat1 %>%
-  tidyr::gather(model,imports,SV,ST,GR,CD) %>%
-  ggplot(aes(x=imports,y=resid))+
+fadeouts %>%
+  ggplot(aes(x=N,y=residual))+
   geom_point()+
-  geom_smooth()+
-  scale_x_log10()+
-  facet_wrap(~model)
+  scale_x_log10()
 
-imp$ext=log(ext[,2]/(1-ext[,2]))
-imp$ext[!is.finite(imp$ext)]=NA
-imp$resext=NA
-imp$resext[is.finite(imp$ext)]=resid(lm(imp$ext~I(log(imp$N))))
-cor(imp[,c(1:4, 8:9)], use="pairwise")
+fadeouts %>%
+  ggplot(aes(x=pred,y=residual))+
+  geom_point()+
+  labs(x="fitted")
+
+fadeouts %>%
+  ggplot(aes(x=pred,y=abs(residual)))+
+  geom_point()+
+  labs(x="fitted",y=expression(group("|",residual,"|")))
+
+plot(fit)
 ```
+
+
+
+# Next steps
+
+
+1. Exponential distance kernels
+1. qAICs and qBayes-weights in table 
+1. Random effects.
+1. Revisit $\sigma$ profile
+1. Revisit TSIR fitting (include residuals?)
+1. Include references for the various models.
+
+To study whether better statistical fit translates to meaningful improvement on prediction on incidence we can look at CCS patterns:
 
 # References
