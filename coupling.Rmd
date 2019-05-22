@@ -1,6 +1,5 @@
 ---
 title: "Spatial coupling in measles via fade-out survival analysis"
-csl: ecology.csl
 params:
   prefix: "coupling"
 output:
@@ -13,9 +12,10 @@ output:
     toc: yes
     toc_depth: 2
     toc_float:
-      collapsed: no
+      collapsed: yes
       smooth_scroll: yes
 bibliography: gravity.bib
+csl: ecology.csl
 ---
 
 \newcommand\prob[1]{\mathbb{P}\left[{#1}\right]}
@@ -83,6 +83,8 @@ library(bbmle)
 library(nloptr)
 library(pomp2)
 library(ggplot2)
+library(scales)
+library(sp)
 theme_set(theme_bw())
 ```
 
@@ -122,6 +124,62 @@ In the above:
 1. Join with demographic data.
 1. Scale birth rates to births/biweek.
 
+## Fadeouts
+
+```{r fadeout-plot,fig.height=4.4}
+dat %>%
+  ddply(~town,summarize,
+        efrac=(sum(cases==0)+0.5)/(length(cases)+0.5),
+        N=mean(pop)) -> fadeouts
+
+lm(qlogis(p=efrac)~log(N),data=fadeouts,subset=efrac>0) -> fit
+predict(fit,se.fit=TRUE) -> pfit
+
+fadeouts %>%
+  mutate(
+    pred=plogis(q=pfit$fit),
+    hi=plogis(q=pfit$fit+2*pfit$se.fit),
+    lo=plogis(q=fit$fit-2*pfit$se.fit),
+    residual=residuals(fit)
+  ) -> fadeouts
+
+fadeouts %>%
+  ggplot(aes(x=N,y=efrac))+
+  geom_point()+
+  geom_line(aes(y=pred))+
+  geom_ribbon(aes(ymin=lo,ymax=hi),color="grey50",alpha=0.3)+
+  scale_x_log10()+
+  labs(y="proportion of zeros")
+
+fadeouts %>%
+  ggplot(aes(x=N,y=efrac))+
+  geom_point()+
+  geom_line(aes(y=pred))+
+  geom_ribbon(aes(ymin=lo,ymax=hi),color="grey50",alpha=0.3)+
+  scale_y_continuous(trans=logit_trans())+
+  scale_x_log10()+
+  labs(y="proportion of zeros")
+
+fadeouts %>%
+  ggplot(aes(x=N,y=residual))+
+  geom_point()+
+  scale_x_log10()
+
+fadeouts %>%
+  ggplot(aes(x=pred,y=residual))+
+  geom_point()+
+  labs(x="fitted")
+
+fadeouts %>%
+  ggplot(aes(x=pred,y=abs(residual)))+
+  geom_point()+
+  labs(x="fitted",y=expression(group("|",residual,"|")))
+
+plot(fit)
+```
+
+## Coordinates and distances
+
 Now let's compute the distances between the cities.
 
 ```{r coords}
@@ -137,12 +195,13 @@ bake(file="coords.rds",{
 ```{r distances,eval=FALSE,purl=TRUE}
 bake(file="distances.rds",{
   library(aakmisc)
-  
   library(geosphere)
-  distm(coords %>% subset(select=c(long,lat)),
+  
+  distm(
+    coords %>% subset(select=c(long,lat)),
     coords %>% subset(select=c(long,lat))) %>%
     matrix(nrow=nrow(coords),ncol=nrow(coords),
-      dimnames=list(coords$town,coords$town))
+           dimnames=list(coords$town,coords$town))
 }) -> distances
 ```
 
@@ -316,7 +375,6 @@ bake(file="tsir-fits.rds",{
 Just for interest, let's plot $R_0$ as a function of city size.
 
 ```{r R0-plot}
-library(scales)
 dat %>% ddply(~town,summarize,N=mean(Ps),
   beta=exp(mean(log.beta)),R0=beta*N) %>%
   ggplot(aes(x=N,y=R0))+geom_point()+
@@ -362,6 +420,7 @@ dat %>% daply(~town,function(x)unique(x$Ps)) -> N
 readRDS("distances.rds") -> distances
 dd <- 1/distances
 diag(dd) <- 0
+dd <- dd[rownames(ylag),rownames(ylag)]
 
 stopifnot(identical(rownames(ylag),rownames(slag)))
 stopifnot(identical(rownames(ylag),rownames(beta)))
@@ -1634,7 +1693,7 @@ dplyr::bind_rows(
   subset(select=c(model,loglik,qaic,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi)) %>%
   rename(c(theta="$\\log_{10}{\\theta}$",cHat="$\\hat{c}$",phi="$\\log_{10}{\\phi}$",rho="$\\rho$",
     psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
-    loglik="$\\ell$",qaic="QAIC",delta.qaic="$\\Delta\\!\\mathrm{QAIC}$")) %>%
+    loglik="$\\ell$",qaic="$\\mathrm{QAIC}$",delta.qaic="$\\Delta\\!\\mathrm{QAIC}$")) %>%
   kable(digits=3)
 ```
 
@@ -1747,11 +1806,15 @@ impexp %>%
 
 ## Overall import and export rates
 
+```{r maps,message=FALSE,results="hide"}
+readRDS("BritishIsles.rds") -> gb
+gb %>%
+  subset(NAME_1 %in% c("England","Wales")) %>%
+  bbox() -> bbox
+
+```
+  
 ```{r ratemaps,message=FALSE,results="hide"}
-library(rgdal)
-
-readOGR("EngWal.shp") -> gb
-
 impexp %>%
   dplyr::select(town,model,export=erate,import=irate) %>%
   dplyr::filter(model %in% c("RV","GR","CD","SV")) %>%
@@ -1782,6 +1845,7 @@ foreach (c=iter(comps,"row")) %do% {
     ggplot(aes(x=long,y=lat))+
     geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
     coord_map(projection="gilbert")+
+    lims(x=bbox["x",],y=bbox["y",])+
     geom_point(
       data=d,
       aes(x=long,y=lat,color=value),
@@ -1897,6 +1961,7 @@ foreach (c=iter(comps,"row")) %do% {
     ggplot(aes(x=long,y=lat))+
     geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
     coord_map(projection="gilbert")+
+    lims(x=bbox["x",],y=bbox["y",])+
     geom_point(
       data=dd,
       aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
@@ -1917,64 +1982,8 @@ print(likmaps)
 
 The above plots are limited to cities of less than $`r poplim`$ souls, since larger cities have few or no fadeouts.
 
-## Fadeouts
-
-```{r fadeout-plot,fig.height=4.4}
-dat %>%
-  ddply(~town,summarize,
-        efrac=(sum(cases==0)+0.5)/(length(cases)+0.5),
-        N=mean(pop)) -> fadeouts
-
-lm(qlogis(p=efrac)~log(N),data=fadeouts,subset=efrac>0) -> fit
-predict(fit,se.fit=TRUE) -> pfit
-
-fadeouts %>%
-  mutate(
-    pred=plogis(q=pfit$fit),
-    hi=plogis(q=pfit$fit+2*pfit$se.fit),
-    lo=plogis(q=fit$fit-2*pfit$se.fit),
-    residual=residuals(fit)
-  ) -> fadeouts
-
-fadeouts %>%
-  ggplot(aes(x=N,y=efrac))+
-  geom_point()+
-  geom_line(aes(y=pred))+
-  geom_ribbon(aes(ymin=lo,ymax=hi),color="grey50",alpha=0.3)+
-  scale_x_log10()+
-  labs(y="proportion of zeros")
-
-fadeouts %>%
-  ggplot(aes(x=N,y=efrac))+
-  geom_point()+
-  geom_line(aes(y=pred))+
-  geom_ribbon(aes(ymin=lo,ymax=hi),color="grey50",alpha=0.3)+
-  scale_y_continuous(trans=logit_trans())+
-  scale_x_log10()+
-  labs(y="proportion of zeros")
-
-fadeouts %>%
-  ggplot(aes(x=N,y=residual))+
-  geom_point()+
-  scale_x_log10()
-
-fadeouts %>%
-  ggplot(aes(x=pred,y=residual))+
-  geom_point()+
-  labs(x="fitted")
-
-fadeouts %>%
-  ggplot(aes(x=pred,y=abs(residual)))+
-  geom_point()+
-  labs(x="fitted",y=expression(group("|",residual,"|")))
-
-plot(fit)
-```
-
-
 
 # Next steps
-
 
 1. Exponential distance kernels
 1. qAICs and qBayes-weights in table 
@@ -1982,7 +1991,5 @@ plot(fit)
 1. Revisit $\sigma$ profile
 1. Revisit TSIR fitting (include residuals?)
 1. Include references for the various models.
-
-To study whether better statistical fit translates to meaningful improvement on prediction on incidence we can look at CCS patterns:
 
 # References
