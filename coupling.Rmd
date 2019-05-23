@@ -30,7 +30,7 @@ Produced with **R** version `r getRversion()`.
 
 --------------------------
 
-```{r knitr-opts,include=FALSE,cache=FALSE}
+```{r knitr-opts,include=FALSE,cache=FALSE,purl=FALSE}
 library(knitr)
 opts_chunk$set(
   eval=TRUE,
@@ -92,7 +92,7 @@ theme_set(theme_bw())
 
 Retrieve the data from the database.
 
-```{r clean-data,eval=TRUE,purl=TRUE}
+```{r clean-data,purl=TRUE}
 stew(file="clean_data.rda",{
   library(aakmisc)
   
@@ -126,7 +126,7 @@ In the above:
 
 ## Fadeouts
 
-```{r fadeout-plot,fig.height=4.4}
+```{r fadeout-plot,fig.height=4.4,purl=FALSE}
 dat %>%
   ddply(~town,summarize,
         efrac=(sum(cases==0)+0.5)/(length(cases)+0.5),
@@ -182,7 +182,7 @@ plot(fit)
 
 Now let's compute the distances between the cities.
 
-```{r coords}
+```{r coords,purl=TRUE}
 bake(file="coords.rds",{
   library(aakmisc)
   startTunnel()
@@ -192,7 +192,7 @@ bake(file="coords.rds",{
 }) -> coords
 ```
 
-```{r distances,eval=FALSE,purl=TRUE}
+```{r distances,purl=TRUE}
 bake(file="distances.rds",{
   library(aakmisc)
   library(geosphere)
@@ -207,15 +207,9 @@ bake(file="distances.rds",{
 
 ## Apply TSIR model to the individual towns.
 
-```{r startMPI,cache=FALSE,include=FALSE,purl=TRUE}
-if (file.exists("CLUSTER")) {
-  scan("CLUSTER",what=integer(0)) -> ncpu
-  library(doMPI)
-  cl <- startMPIcluster(ncpu,verbose=TRUE)
-} else {
+```{r startDoMC,cache=FALSE,include=FALSE,purl=TRUE}
   library(doMC)
   registerDoMC()
-}
 ```
 
 ### Susceptible reconstruction.
@@ -225,26 +219,35 @@ Correct for under-reporting: `I = cases/ur`.
 
 Regress cumulative cases on cumulative births to estimate under-reporting (ur) and susceptible depletion (`z`) `I` is estimated as `cases/ur`.
 
-```{r under-reporting,eval=FALSE,purl=TRUE}
-foreach (d=dlply(dat,~town),.combine=rbind,.inorder=FALSE) %dopar% {
-  cumbirths <- cumsum(d$births)
-  cumcases <- cumsum(d$cases)
-  fit <- smooth.spline(cumbirths,cumcases,df=2.5)
-  mutate(d,
-    ur=predict(fit,x=cumbirths,deriv=1)$y,
-    I=cases/ur)
-} -> dat
+```{r under-reporting,purl=TRUE}
+bake(file="under-reporting.rds",{
+  foreach (d=dlply(dat,~town),
+           .combine=rbind,.inorder=FALSE,
+           .packages=c("plyr")
+           ) %dopar% {
+    cumbirths <- cumsum(d$births)
+    cumcases <- cumsum(d$cases)
+    fit <- smooth.spline(cumbirths,cumcases,df=2.5)
+    mutate(d,
+           ur=predict(fit,x=cumbirths,deriv=1)$y,
+           I=cases/ur)
+  } -> dat
+}) -> dat
 ```
 
 Now reconstruct the susceptibles (via the residuals `z`).
 
-```{r susceptible-reconstruction,eval=FALSE,purl=TRUE}
-foreach (d=dlply(dat,~town),.combine=rbind,.inorder=FALSE) %dopar% {
-  cumbirths <- cumsum(d$births)
-  cuminc <- cumsum(d$I)
-  fit <- smooth.spline(cumbirths,cuminc,df=2.5)
-  mutate(d,z=-residuals(fit))
-} -> dat
+```{r susceptible-reconstruction,purl=TRUE}
+bake(file="susc-reconst.rds",{
+  foreach (d=dlply(dat,~town),
+           .combine=rbind,.inorder=FALSE,
+           .packages=c("plyr")) %dopar% {
+             cumbirths <- cumsum(d$births)
+             cuminc <- cumsum(d$I)
+             fit <- smooth.spline(cumbirths,cuminc,df=2.5)
+             mutate(d,z=-residuals(fit))
+           } -> dat
+}) -> dat
 ```
 
 *Does the preceding scale the z variable appropriately?*
@@ -256,25 +259,29 @@ First, set up the data matrix for the regression.
 This involves lagging the I and z variables.
 Population size is assumed constant at its median value.
 
-```{r make-data-matrix,eval=FALSE,purl=TRUE}
-dat %>%
-  ddply(~town,mutate,
-    Ilag=c(NA,head(I,-1)),
-    zlag=c(NA,head(z,-1)),
-    Ps=median(pop),
-    seas=factor(biweek,levels=1:26)) %>%
-  ddply(~town,tail,-1) -> dat
+```{r make-data-matrix,purl=TRUE}
+bake(file="data-matrix.rds",{
+  dat %>%
+    ddply(~town,mutate,
+          Ilag=c(NA,head(I,-1)),
+          zlag=c(NA,head(z,-1)),
+          Ps=median(pop),
+          seas=factor(biweek,levels=1:26)) %>%
+    ddply(~town,tail,-1) -> dat
+}) -> dat
 ```
 
 We'll start by estimating the mean susceptible fraction, assuming a single global value for this parameter.
 Some towns have very high changes in susceptible fraction; exclude these.
 
-```{r exclude-weird-towns,eval=FALSE,purl=TRUE}
-dat %>%
-  ddply(~town,summarize,
-    maxfrac=max(-z/Ps)) %>%
-  subset(maxfrac>0.03) %>%
-  extract2("town") -> excludes
+```{r exclude-weird-towns,purl=TRUE}
+bake(file="exclusions.rds",{
+  dat %>%
+    ddply(~town,summarize,
+          maxfrac=max(-z/Ps)) %>%
+    subset(maxfrac>0.03) %>%
+    extract2("town") -> excludes
+}) -> excludes
 
 print(length(excludes))
 ```
@@ -283,47 +290,47 @@ Now profile on the fraction, $\sigma$, of susceptibles in the population.
 This assumes a single, global value of $\sigma$.
 **NOTE: the $\beta$ are here scaled by population size.**
 
-```{r sigma-profile,eval=FALSE,purl=TRUE}
-dat %>% subset(!(town%in%excludes)) -> dat1
-
+```{r sigma-profile,purl=TRUE}
 sigma1dev <- function (dat, sigma) {
   slag <- with(dat,sigma*Ps+zlag)
   fit <- glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(log(slag)),
-    data=dat,subset=Ilag>0&I>0)
+             data=dat,subset=Ilag>0&I>0)
   fit$deviance
 }
 
-foreach (sigma=seq(0.03,0.25,length=100),
-  .combine=rbind,.inorder=FALSE) %dopar%
-  {
-    dat1 %>%
-      daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>%
-      sum() -> dev
-    data.frame(sigma=sigma,dev=dev)
-  } -> sigmaProf
+bake(file="sigma-profile.rds",{
+  dat %>% subset(!(town%in%excludes)) -> dat1
+  foreach (
+    sigma=seq(0.03,0.25,length=100),
+    .combine=rbind,.inorder=FALSE,
+    .packages=c("plyr","magrittr")) %dopar% {
+      dat1 %>%
+        daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>%
+        sum() -> dev
+      data.frame(sigma=sigma,dev=dev)
+    } -> sigmaProf
+  
+}) -> sigmaProf
+```
 
-sigmaProf %>% saveRDS("sigma-profile.rds")
-
-fit <- optim(par=0.037,lower=0.03,upper=0.10,
-  method="Brent",hessian=TRUE,
-  fn=function (sigma) {
-    dat1 %>%
-      daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>%
-      sum()
-  })
-fit$par -> sigmaBar
-
-rm(dat1)
-
-sigmaBar %>% saveRDS("sigma-bar.rds")
+```{r sigma-bar,purl=TRUE}
+bake(file="sigma-bar.rds",{
+  dat %>% subset(!(town%in%excludes)) -> dat1
+  fit <- optim(par=0.037,lower=0.03,upper=0.10,
+               method="Brent",hessian=TRUE,
+               fn=function (sigma) {
+                 dat1 %>%
+                   daply(~town,sigma1dev,sigma=sigma,.parallel=TRUE) %>%
+                   sum()
+               })
+  fit$par -> sigmaBar
+}) -> sigmaBar
 
 dat %>% mutate(Slag=sigmaBar*Ps+zlag) -> dat
 ```
 
-```{r sigma-profile-plot}
-readRDS("sigma-bar.rds") -> sigmaBar
-readRDS("sigma-profile.rds") %>%
-  ggplot(aes(x=sigma,y=dev))+geom_line()
+```{r sigma-profile-plot,purl=FALSE}
+sigmaProf %>% ggplot(aes(x=sigma,y=dev))+geom_line()
 ```
 
 Our global sigma estimate is $\sigma=`r signif(sigmaBar,3)`$.
@@ -374,12 +381,13 @@ bake(file="tsir-fits.rds",{
 
 Just for interest, let's plot $R_0$ as a function of city size.
 
-```{r R0-plot}
-dat %>% ddply(~town,summarize,N=mean(Ps),
-  beta=exp(mean(log.beta)),R0=beta*N) %>%
+```{r R0-plot,purl=FALSE}
+dat %>% 
+  ddply(~town,summarize,N=mean(Ps),
+        beta=exp(mean(log.beta)),R0=beta*N) %>%
   ggplot(aes(x=N,y=R0))+geom_point()+
   scale_x_log10(breaks=10^seq(2,7),
-    labels=trans_format('log10',math_format(10^.x)))+
+                labels=trans_format('log10',math_format(10^.x)))+
   scale_y_log10(breaks=seq(1,30))+
   labs(x="Population size",y=expression(R[0]))+
   theme_classic()
@@ -437,6 +445,18 @@ alpha <- mean(dat$alpha)
 relevant <- which(ylag==0&slag>=0)
 obs <- obs[relevant]
 betaS <- beta[relevant]*slag[relevant]
+```
+
+```{r startMPI,cache=FALSE,include=FALSE,purl=TRUE}
+if (file.exists("CLUSTER")) {
+  scan("CLUSTER",what=integer(0)) -> ncpu
+  library(doMPI)
+  cl <- startMPIcluster(ncpu,verbose=TRUE)
+  registerDoMPI(cl)
+} else {
+  library(doMC)
+  registerDoMC()
+}
 ```
 
 # The gravity model
@@ -572,7 +592,7 @@ bake("gravity-mle.rds",{
 }) -> mle.grav
 ```
 
-```{r gravity-results}
+```{r gravity-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -625,7 +645,7 @@ Halted because roundoff errors limited progress. (In this case, the optimization
 - NLOPT_FORCED_STOP = -5
 Halted because of a forced termination: the user called nlopt_force_stop(opt) on the optimization’s  nlopt_opt object opt from the user’s objective function or constraints.
 
-```{r gravity-pairsplot,fig.height=6.83}
+```{r gravity-pairsplot,fig.height=6.83,purl=FALSE}
 pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik)-10000,cex=0.5)
@@ -718,7 +738,7 @@ bake("xia-mle.rds",{
 }) -> mle.xia
 ```
 
-```{r xia-results}
+```{r xia-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -741,7 +761,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r xia-pairsplot,fig.height=6.83}
+```{r xia-pairsplot,fig.height=6.83,purl=FALSE}
 pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik)-10000,cex=0.5)
@@ -843,7 +863,7 @@ bake(file="meanfield.rds",{
 }) -> results
 ```
 
-```{r meanfield-pairsplot,fig.height=6.83}
+```{r meanfield-pairsplot,fig.height=6.83,purl=FALSE}
 pairs(~loglik+theta+phi+psi,
   data=results %>%
     extract(!sapply(results,inherits,"try-error")) %>%
@@ -875,7 +895,7 @@ bake("meanfield-mle.rds",{
 }) -> mle.meanfield
 ```
 
-```{r meanfield-results}
+```{r meanfield-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1011,7 +1031,7 @@ bake("diffusion-mle.rds",{
 }) -> mle.diffusion
 ```
 
-```{r diffusion-results}
+```{r diffusion-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1030,7 +1050,7 @@ results %>%
   labs(x=expression(rho),y=expression(log(L)))
 ```
 
-```{r diffusion-pairsplot,fig.height=6.83}
+```{r diffusion-pairsplot,fig.height=6.83,purl=FALSE}
 pairs(~loglik+theta+phi+psi+rho,
   data=results,
   subset=loglik>max(loglik)-10000,cex=0.5)
@@ -1172,7 +1192,7 @@ bake("compdest-mle.rds",{
 ```
 
 
-```{r compdest-results}
+```{r compdest-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1195,7 +1215,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r compdest-pairsplot,fig.height=6.83}
+```{r compdest-pairsplot,fig.height=6.83,purl=FALSE}
 pairs(~loglik+theta+phi+rho+delta+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik)-10000,cex=0.5)
@@ -1293,7 +1313,7 @@ bake("stouffer-mle.rds",{
 }) -> mle.stouffer
 ```
 
-```{r stouffer-results}
+```{r stouffer-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1317,7 +1337,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r stouffer-pairsplot,fig.height=6.83}
+```{r stouffer-pairsplot,fig.height=6.83,purl=FALSE}
 pairs(~loglik+theta+phi+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
@@ -1414,7 +1434,7 @@ bake("stouffer1-mle.rds",{
 }) -> mle.stouffer1
 ```
 
-```{r stouffer1-results}
+```{r stouffer1-results,purl=FALSE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1437,7 +1457,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r stouffer1-pairsplot,fig.height=6.83}
+```{r stouffer1-pairsplot,fig.height=6.83,purl=FALSE}
 pairs(~loglik+theta+phi+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
@@ -1481,7 +1501,7 @@ bake(file="radiation-mle.rds",{
 }) -> fit
 ```
 
-```{r radiation-results}
+```{r radiation-results,purl=FALSE}
 summary(fit)
 logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
@@ -1525,7 +1545,7 @@ bake(file="radiation1-mle.rds",{
 }) -> fit
 ```
 
-```{r radiation1-results}
+```{r radiation1-results,purl=FALSE}
 summary(fit)
 logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
@@ -1535,7 +1555,7 @@ c(coef(fit),loglik=logLik(fit)) %>%
 
 # Model comparison
 
-```{r modelcomp,cache=FALSE,echo=FALSE}
+```{r modelcomp,cache=FALSE,echo=FALSE,purl=FALSE}
 summaryGravity <- function (mle) {
   npar <- 6
   mle %$% {
@@ -1703,7 +1723,7 @@ dplyr::bind_rows(
 
 We can predict importation rates from fitted models
 
-```{r matrices}
+```{r matrices,purl=FALSE}
 #Gravity
 readRDS("gravity-mle.rds") %$% {
   theta <- exp(theta)
@@ -1763,7 +1783,7 @@ mle.radiation1 %$% {
 } -> RVmat
 ```
 
-```{r import_export}
+```{r import_export,purl=FALSE}
 data.frame(
   SV_import=SVmat %>% rowMeans(),
   ST_import=STmat %>% rowMeans(),
@@ -1789,7 +1809,7 @@ data.frame(
   join(coords,by="town") -> impexp
 ```
 
-```{r imp_exp_map,fig.height=6.83}
+```{r imp_exp_map,fig.height=6.83,purl=FALSE}
 impexp %>%
   dplyr::select(town,N,model,export=erate,import=irate) %>%
   dplyr::filter(model %in% c("SV","CD","GR","RV")) %>%
@@ -1806,7 +1826,7 @@ impexp %>%
 
 ## Overall import and export rates
 
-```{r maps,message=FALSE,results="hide"}
+```{r maps,message=FALSE,results="hide",purl=FALSE}
 readRDS("BritishIsles.rds") -> gb
 gb %>%
   subset(NAME_1 %in% c("England","Wales")) %>%
@@ -1814,7 +1834,7 @@ gb %>%
 
 ```
   
-```{r ratemaps,message=FALSE,results="hide"}
+```{r ratemaps,message=FALSE,results="hide",purl=FALSE}
 impexp %>%
   dplyr::select(town,model,export=erate,import=irate) %>%
   dplyr::filter(model %in% c("RV","GR","CD","SV")) %>%
@@ -1865,7 +1885,7 @@ print(ratemaps)
 
 ## Likelihood differences
 
-```{r likmaps,results="hide"}
+```{r likmaps,results="hide",purl=FALSE}
 dat %>% acast(town~year+biweek,value.var="cases") -> obs1
 
 likGravity <- function (mle) {
@@ -1991,5 +2011,9 @@ The above plots are limited to cities of less than $`r poplim`$ souls, since lar
 1. Revisit $\sigma$ profile
 1. Revisit TSIR fitting (include residuals?)
 1. Include references for the various models.
+
+```{r session-info,cache=FALSE}
+sessionInfo()
+```
 
 # References
