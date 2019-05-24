@@ -1809,7 +1809,7 @@ data.frame(
   join(coords,by="town") -> impexp
 ```
 
-```{r imp_exp_map,fig.height=6.83,purl=FALSE}
+```{r imp_exp_by_size,fig.height=6.83,purl=FALSE}
 impexp %>%
   dplyr::select(town,N,model,export=erate,import=irate) %>%
   dplyr::filter(model %in% c("SV","CD","GR","RV")) %>%
@@ -1826,7 +1826,7 @@ impexp %>%
 
 ## Overall import and export rates
 
-```{r maps,message=FALSE,results="hide",purl=FALSE}
+```{r imp_exp_maps,message=FALSE,results="hide",purl=FALSE}
 readRDS("BritishIsles.rds") -> gb
 gb %>%
   subset(NAME_1 %in% c("England","Wales")) %>%
@@ -1997,6 +1997,44 @@ foreach (c=iter(comps,"row")) %do% {
 } -> likmaps
 
 print(likmaps)
+
+```
+
+```{r loglik_by_size,purl=FALSE,results="hide"}
+foreach (c=iter(comps,"row")) %do% {
+  
+  spatialLiks %>% 
+    dplyr::filter(model %in% c("SV","CD","GR","RV")) %>%
+    dplyr::mutate(
+      model=factor(model,levels=c("SV","CD","GR","RV"))
+    ) %>%
+    dplyr::filter(model==c$model1) %>%
+    dplyr::select(model,town,N,value) -> d1
+  spatialLiks %>% 
+    dplyr::filter(model %in% c("SV","CD","GR","RV")) %>%
+    dplyr::mutate(
+      model=factor(model,levels=c("SV","CD","GR","RV"))
+    ) %>%
+    dplyr::filter(model==c$model2) %>%
+    dplyr::select(model,town,N,value) -> d2
+  dplyr::full_join(d1,d2,by=c("town","N"),
+                   suffix=c("_1","_2")) %>%
+    mutate(diff=value_1-value_2) -> dd
+  
+ dd %>%
+   ggplot(aes(x=N,y=diff,color=diff>0,group=1))+
+   geom_point()+
+   scale_x_log10()+
+   guides(color=FALSE)+
+   geom_smooth(method="loess")+
+   scale_color_manual(values=c(`TRUE`=muted("blue"),`FALSE`=muted("red")))+
+   labs(title="mean per datum differences in log likelihood",
+        subtitle=sprintf("%s - %s",c$model1,c$model2),
+        x="",y="",color="") -> pl
+ 
+} -> likpl
+
+print(likpl)
 
 ```
 
