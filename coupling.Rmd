@@ -85,6 +85,7 @@ library(pomp2)
 library(ggplot2)
 library(scales)
 library(sp)
+library(ncf)
 theme_set(theme_bw())
 ```
 
@@ -175,7 +176,7 @@ fadeouts %>%
   geom_point()+
   labs(x="fitted",y=expression(group("|",residual,"|")))
 
-plot(fit)
+plot(fit,which=1:5,ask=FALSE)
 ```
 
 ## Coordinates and distances
@@ -1885,7 +1886,7 @@ print(ratemaps)
 
 ## Likelihood differences
 
-```{r likmaps,results="hide",purl=FALSE}
+```{r loglik_matrices,purl=FALSE,results="hide"}
 dat %>% acast(town~year+biweek,value.var="cases") -> obs1
 
 likGravity <- function (mle) {
@@ -1969,35 +1970,6 @@ expand.grid(m2=1:4,m1=1:4) %>%
            model2=c("SV","CD","GR","RV")[m2]
          ) -> comps
 
-foreach (c=iter(comps,"row")) %do% {
-  
-  spatialLiks %>% dplyr::filter(model==c$model1) -> d1
-  spatialLiks %>% dplyr::filter(model==c$model2) -> d2
-  dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-    suffix=c("_1","_2")) %>%
-    mutate(diff=value_1-value_2) -> dd
-  
- gb %>%
-    ggplot(aes(x=long,y=lat))+
-    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-    coord_map(projection="gilbert")+
-    lims(x=bbox["x",],y=bbox["y",])+
-    geom_point(
-      data=dd,
-      aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
-      size=1
-    )+
-   guides(alpha=FALSE)+
-   scale_color_gradient2(mid="gray90")+
-   labs(title="per datum differences in log likelihood",
-     subtitle=sprintf("%s - %s",c$model1,c$model2),
-     x="",y="",color="")+
-   theme(axis.text=element_blank()) -> pl
- 
-} -> likmaps
-
-print(likmaps)
-
 ```
 
 ```{r loglik_by_size,purl=FALSE,results="hide"}
@@ -2035,6 +2007,82 @@ foreach (c=iter(comps,"row")) %do% {
 } -> likpl
 
 print(likpl)
+
+```
+
+```{r likmaps,results="hide",purl=FALSE}
+foreach (c=iter(comps,"row")) %do% {
+  
+  spatialLiks %>% dplyr::filter(model==c$model1) -> d1
+  spatialLiks %>% dplyr::filter(model==c$model2) -> d2
+  dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+    suffix=c("_1","_2")) %>%
+    mutate(diff=value_1-value_2) -> dd
+  
+ gb %>%
+    ggplot(aes(x=long,y=lat))+
+    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+    coord_map(projection="gilbert")+
+    lims(x=bbox["x",],y=bbox["y",])+
+    geom_point(
+      data=dd,
+      aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
+      size=1
+    )+
+   guides(alpha=FALSE)+
+   scale_color_gradient2(mid="gray90")+
+   labs(title="per datum differences in log likelihood",
+     subtitle=sprintf("%s - %s",c$model1,c$model2),
+     x="",y="",color="")+
+   theme(axis.text=element_blank()) -> pl
+ 
+} -> likmaps
+
+print(likmaps)
+
+```
+
+```{r loglik_lisa,results="hide",purl=FALSE}
+foreach (c=iter(comps[c(2,4),],"row")) %do% {
+  
+  spatialLiks %>% dplyr::filter(model==c$model1) -> d1
+  spatialLiks %>% dplyr::filter(model==c$model2) -> d2
+  dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+    suffix=c("_1","_2")) %>%
+    mutate(diff=value_1-value_2) -> dd
+  
+  with(dd,
+    ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+  ) -> ddlisa
+  
+  dd %>%
+    dplyr::mutate(
+      corr=ddlisa$correlation,
+      mean=ddlisa$mean,
+      p=ddlisa$p
+    ) %>%
+    dplyr::filter(p<0.05) -> dd
+
+ gb %>%
+    ggplot(aes(x=long,y=lat))+
+    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+    coord_map(projection="gilbert")+
+    lims(x=bbox["x",],y=bbox["y",])+
+    geom_point(
+      data=dd,
+      aes(x=long,y=lat,color=diff,alpha=0.5),
+      size=1
+    )+
+   guides(alpha=FALSE)+
+   scale_color_gradient2(mid="gray90")+
+   labs(title="significant per datum differences in log likelihood",
+     subtitle=sprintf("%s - %s",c$model1,c$model2),
+     x="",y="",color="")+
+   theme(axis.text=element_blank()) -> pl
+ 
+} -> lisamaps
+
+print(lisamaps)
 
 ```
 
