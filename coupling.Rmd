@@ -1,21 +1,24 @@
 ---
 title: "Spatial coupling in measles via fade-out survival analysis"
-params:
-  prefix: "coupling"
+csl: ecology.csl
 output:
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
   html_document:
     code_folding: hide
+    dev: png
     df_print: paged
     highlight: tango
-    dev: png
     number_sections: no
     toc: yes
     toc_depth: 2
     toc_float:
       collapsed: yes
       smooth_scroll: yes
+params:
+  prefix: coupling
 bibliography: gravity.bib
-csl: ecology.csl
 ---
 
 \newcommand\prob[1]{\mathbb{P}\left[{#1}\right]}
