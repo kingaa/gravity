@@ -84,7 +84,7 @@ library(foreach)
 library(iterators)
 library(bbmle)
 library(nloptr)
-library(pomp2)
+library(pomp)
 library(ggplot2)
 library(scales)
 library(sp)
@@ -455,7 +455,7 @@ betaS <- beta[relevant]*slag[relevant]
 if (file.exists("CLUSTER")) {
   scan("CLUSTER",what=integer(0)) -> ncpu
   library(doMPI)
-  cl <- startMPIcluster(ncpu,verbose=TRUE)
+  cl <- startMPIcluster(ncpu,verbose=TRUE,logdir="/tmp")
   registerDoMPI(cl)
 } else {
   library(doMC)
@@ -1196,19 +1196,21 @@ bake("compdest-mle.rds",{
 ```
 
 
-```{r compdest-results,purl=FALSE}
+```{r compdest-results,purl=TRUE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
   unique()
 
-results %<>%
+results %>%
   extract(!sapply(results,inherits,"try-error")) %>%
   ldply() %>%
-  mutate(rho=exp(rho),theta=exp(theta),psi=exp(psi),phi=exp(phi))
+  mutate(rho=exp(rho),theta=exp(theta),psi=exp(psi),phi=exp(phi)) -> results
 
 results %>% count(~conv)
+```
 
+```{r compdest-plot,purl=FALSE}
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
     fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
@@ -1225,6 +1227,276 @@ pairs(~loglik+theta+phi+rho+delta+psi+tau1+tau2,
   subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
+## One-D profiles
+
+### $\delta$
+
+```{r compdest-profile-delta,cache=FALSE,purl=TRUE}
+bake(file="compdest_delta.rds",{
+  
+  grd <- profileDesign(
+    delta=seq(-1.6,0,length=250),
+    lower=c(tau1=0.1,tau2=-1,psi=log(5),theta=log(0.1),phi=log(1e-6),rho=log(1.5)),
+    upper=c(tau1=1.4,tau2=1,psi=log(7),theta=log(45),phi=log(1e-2),rho=log(30)),
+    nprof=50
+  )
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("delta")
+      formals(likfnCompDest) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnCompDest,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1000,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> res
+  
+  res %>%
+    extract(sapply(res,inherits,"try-error")) %>%
+    sapply(as.character) %>%
+    unique() %>%
+    print()
+  
+  res %>%
+    extract(!sapply(res,inherits,"try-error")) %>%
+    ldply() %>%
+    ddply(~delta,subset,loglik==max(loglik,na.rm=TRUE)) -> grd
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("delta")
+      formals(likfnCompDest) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnCompDest,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1e-5,
+          xtol_rel=1e-7,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> res1
+  
+  attr(res1,"nproc") <- getDoParWorkers()
+  
+  res1
+}) -> res1
+```
+
+```{r compdest-profile-delta-plot,purl=FALSE}
+res1 %>%
+  ldply() %>%
+  ggplot(aes(x=delta,y=loglik))+
+  geom_point()
+```
+
+The above was completed in `r round(attr(res1,"system.time")[3]/60,1)`&nbsp;min on a `r attr(res1,"nproc")`-core cluster. 
+
+### $\tau_1$
+
+```{r compdest-profile-tau1,cache=FALSE,purl=TRUE}
+bake(file="compdest_tau1.rds",{
+  
+  grd <- profileDesign(
+    tau1=seq(0.1,1.4,length=250),
+    lower=c(tau2=-1,psi=log(5),theta=log(0.1),phi=log(1e-6),rho=log(1.5),delta=-3),
+    upper=c(tau2=1,psi=log(7),theta=log(45),phi=log(1e-2),rho=log(30),delta=0),
+    nprof=50
+  )
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau1")
+      formals(likfnCompDest) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnCompDest,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1000,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> res
+  
+  res %>%
+    extract(sapply(res,inherits,"try-error")) %>%
+    sapply(as.character) %>%
+    unique() %>%
+    print()
+  
+  res %>%
+    extract(!sapply(res,inherits,"try-error")) %>%
+    ldply() %>%
+    ddply(~tau1,subset,loglik==max(loglik,na.rm=TRUE)) -> grd
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau1")
+      formals(likfnCompDest) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnCompDest,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1e-5,
+          xtol_rel=1e-7,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> res2
+  
+  attr(res2,"nproc") <- getDoParWorkers()
+  
+  res2
+}) -> res2
+```
+
+```{r compdest-profile-tau1-plot,purl=FALSE}
+res2 %>%
+  ldply() %>%
+  ggplot(aes(x=tau1,y=loglik))+
+  geom_point()
+```
+
+The above was completed in `r round(attr(res2,"system.time")[3]/60,1)`&nbsp;min on a `r attr(res2,"nproc")`-core cluster. 
+
+### $\tau_2$
+
+```{r compdest-profile-tau2,cache=FALSE,purl=TRUE}
+bake(file="compdest_tau2.rds",{
+  
+  grd <- profileDesign(
+    tau2=seq(-1,1,length=250),
+    lower=c(tau1=0.1,psi=log(5),theta=log(0.1),phi=log(1e-6),rho=log(1.5),delta=-3),
+    upper=c(tau1=1.4,psi=log(7),theta=log(45),phi=log(1e-2),rho=log(30),delta=0),
+    nprof=50
+  )
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau2")
+      formals(likfnCompDest) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnCompDest,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1000,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> res
+  
+  res %>%
+    extract(sapply(res,inherits,"try-error")) %>%
+    sapply(as.character) %>%
+    unique() %>%
+    print()
+  
+  res %>%
+    extract(!sapply(res,inherits,"try-error")) %>%
+    ldply() %>%
+    ddply(~tau2,subset,loglik==max(loglik,na.rm=TRUE)) -> grd
+  
+  foreach(start=iter(grd,"row"),
+    .errorhandling="pass",
+    .inorder=FALSE,
+    .packages=c("nloptr","magrittr")
+  ) %dopar% try(
+    {
+      fixed <- c("tau2")
+      formals(likfnCompDest) %>% names() %>% setdiff(fixed) -> est
+      nloptr(unlist(start[est]),
+        function(x){
+          do.call(likfnCompDest,
+            c(start[fixed],setNames(as.list(x),est)))
+        },
+        opts=list(
+          algorithm="NLOPT_LN_SBPLX",
+          ftol_abs=1e-5,
+          xtol_rel=1e-7,
+          maxeval=10000)
+      ) -> fit
+      fit$solution %>% setNames(est) %>%
+        c(unlist(start[fixed]),loglik=-fit$objective) %>%
+        as.list() %>% as.data.frame() %>%
+        cbind(conv=fit$status) -> res
+    }
+  ) -> res3
+  
+  attr(res3,"nproc") <- getDoParWorkers()
+  
+  res3
+}) -> res3
+```
+
+```{r compdest-profile-tau2-plot,purl=FALSE}
+res3 %>%
+  ldply() %>%
+  ggplot(aes(x=tau2,y=loglik))+
+  geom_point()
+```
+
+The above was completed in `r round(attr(res3,"system.time")[3]/60,1)`&nbsp;min on a `r attr(res3,"nproc")`-core cluster. 
+
+
 # Stouffer model
 
 Let $i$ be the recipient town; $j$, the donor.
@@ -1232,6 +1504,7 @@ Let $S(i,j)$ be the collection of towns closer to town $i$ than $j$ is.
 That is, $S(i,j) = \{k: k\ne i \ \&\ d(i,k) \le d(i,j)\}$.
 
 $$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}+\phi\right).$$
+
 
 
 ```{r rankmat,cache=FALSE,purl=TRUE}
