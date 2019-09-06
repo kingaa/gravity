@@ -8,11 +8,17 @@ REXE = R --vanilla
 RCMD = $(REXE) CMD
 RSCRIPT = Rscript --vanilla
 
-default: coupling.html gravity2.pdf
+default: gravity2.pdf
+
+gravity2.pdf: coupling.html
 
 %.html: %.Rmd
 	PATH=/usr/lib/rstudio/bin/pandoc:$$PATH \
 	Rscript --vanilla -e "rmarkdown::render(\"$*.Rmd\",output_format=\"html_document\")"
+
+%.pdf: %.Rmd
+	PATH=/usr/lib/rstudio/bin/pandoc:$$PATH \
+	Rscript --vanilla -e "rmarkdown::render(\"$*.Rmd\",output_format=\"pdf_document\")"
 
 %.R: %.Rmd
 	Rscript --vanilla -e "library(knitr); purl(\"$*.Rmd\",output=\"$*.R\")"

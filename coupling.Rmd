@@ -2,9 +2,6 @@
 title: "Spatial coupling in measles via fade-out survival analysis"
 csl: ecology.csl
 output:
-  pdf_document:
-    toc: yes
-    toc_depth: '2'
   html_document:
     code_folding: hide
     dev: png
@@ -16,6 +13,9 @@ output:
     toc_float:
       collapsed: yes
       smooth_scroll: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
 params:
   prefix: coupling
 bibliography: gravity.bib
@@ -2160,6 +2160,33 @@ foreach (c=iter(comps,"row")) %do% {
 print(ratemaps)
 ```
 
+## Fadeout residuals
+
+Let's make a spatial plot of the residuals of the logit-log relationship between fadeouts and population size.
+
+```{r spatial_fadeouts,results="hide",purl=FALSE}
+fadeouts %>%
+  dplyr::left_join(coords,by="town") %>%
+  arrange(abs(residual)) -> fo
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  geom_point(
+    data=fo,
+    aes(x=long,y=lat,color=residual),
+    size=1
+  )+
+#  guides(alpha=FALSE)+
+  scale_color_gradient2(mid="gray90")+
+  labs(color="",x="",y="")+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  theme(axis.text=element_blank()) -> spat_fo
+
+print(spat_fo)
+```
+
 ## Likelihood differences
 
 ```{r loglik_matrices,purl=FALSE,results="hide"}
@@ -2302,7 +2329,7 @@ foreach (c=iter(comps,"row")) %do% {
     lims(x=bbox["x",],y=bbox["y",])+
     geom_point(
       data=dd,
-      aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
+        aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
       size=1
     )+
    guides(alpha=FALSE)+
