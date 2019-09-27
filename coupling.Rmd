@@ -463,7 +463,7 @@ if (file.exists("CLUSTER")) {
 }
 ```
 
-# The gravity model
+# Gravity model
 
 The gravity model (with intercept) is
 $$\iota_i=N_i^{\tau_1} \left(\theta\,\sum_{j\ne i}\! N_j^{\tau_2} d_{ij}^{-\rho}\,\frac{I_j}{N_j}+\phi\right).$$
@@ -658,7 +658,7 @@ pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
 We look for evidence of overdispersion by computing the scale parameter for the negative binomial model.
 
 
-# The Xia (wonky gravity) model
+# Xia model
 
 The model of @xia2004measles is
 $$\iota_i=N_i^{\tau_1}\,\left(\theta\,\sum_{j\ne i}\! I_j^{\tau_2} d_{ij}^{-\rho} + \phi\right).$$
@@ -771,7 +771,7 @@ pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
   subset=loglik>max(loglik)-10000,cex=0.5)
 ```
 
-# The mean field model
+# Mean field model
 
 By setting $\rho = 0$ and $\tau_1=\tau_2=1$ in the gravity model, we obtain mean-field model.
 
@@ -1990,8 +1990,17 @@ dplyr::bind_rows(
   subset(select=c(model,loglik,qaic,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi)) %>%
   rename(c(theta="$\\log_{10}{\\theta}$",cHat="$\\hat{c}$",phi="$\\log_{10}{\\phi}$",rho="$\\rho$",
     psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
-    loglik="$\\ell$",qaic="$\\mathrm{QAIC}$",delta.qaic="$\\Delta\\!\\mathrm{QAIC}$")) %>%
+    loglik="$\\ell$",qaic="$\\mathrm{QAIC}$",delta.qaic="$\\Delta\\!\\mathrm{QAIC}$")) -> tab
+
+tab %>%
   kable(digits=3)
+```
+
+```{r latex_table,include=FALSE}
+library(Hmisc)
+tab %>%
+  dplyr::select(c(1,2,4:12)) %>%
+  Hmisc::latex(title="table1")
 ```
 
 # Diagnostics
@@ -2063,17 +2072,17 @@ mle.radiation1 %$% {
 ```{r import_export,purl=FALSE}
 data.frame(
   SV_import=SVmat %>% rowMeans(),
-  ST_import=STmat %>% rowMeans(),
-  GR_import=GRmat %>% rowMeans(),
+  S_import=STmat %>% rowMeans(),
+  G_import=GRmat %>% rowMeans(),
   CD_import=CDmat %>% rowMeans(),
   RV_import=RVmat %>% rowMeans(),
-  RD_import=RDmat %>% rowMeans(),
+  R_import=RDmat %>% rowMeans(),
   SV_export=SVmat %>% colMeans(),
-  ST_export=STmat %>% colMeans(),
-  GR_export=GRmat %>% colMeans(),
+  S_export=STmat %>% colMeans(),
+  G_export=GRmat %>% colMeans(),
   CD_export=CDmat %>% colMeans(),
   RV_export=RVmat %>% colMeans(),
-  RD_export=RDmat %>% colMeans(),
+  R_export=RDmat %>% colMeans(),
   N=N
 ) %>% 
   name_rows() %>%
@@ -2089,9 +2098,9 @@ data.frame(
 ```{r imp_exp_by_size,fig.height=6.83,purl=FALSE}
 impexp %>%
   dplyr::select(town,N,model,export=erate,import=irate) %>%
-  dplyr::filter(model %in% c("SV","CD","GR","RV")) %>%
+  dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
   dplyr::mutate(
-           model=factor(model,levels=c("SV","CD","GR","RV"))
+           model=factor(model,levels=c("SV","CD","G","RV"))
          ) %>%
   tidyr::gather(rate,value,import,export) %>%
   ggplot(aes(x=N,y=value))+
@@ -2114,15 +2123,15 @@ gb %>%
 ```{r ratemaps,message=FALSE,results="hide",purl=FALSE}
 impexp %>%
   dplyr::select(town,model,export=erate,import=irate) %>%
-  dplyr::filter(model %in% c("RV","GR","CD","SV")) %>%
+  dplyr::filter(model %in% c("RV","G","CD","SV")) %>%
   tidyr::gather(variable,value,export,import) %>%
   acast(model~town~variable,value.var="value") %>%
   aaply(c(2,3),function(x)outer(x,x,FUN="-")) %>%
   melt() %>%
   dplyr::rename(town=X1,variable=X2,m1=Var3,m2=Var4) %>% 
   mutate(
-    m1=ordered(m1,levels=c("RV","GR","CD","SV")),
-    m2=ordered(m2,levels=c("RV","GR","CD","SV"))
+    m1=ordered(m1,levels=c("RV","G","CD","SV")),
+    m2=ordered(m2,levels=c("RV","G","CD","SV"))
   ) %>%
   dplyr::filter(m1 > m2) %>% 
   dplyr::left_join(coords,by="town") -> ied
@@ -2130,8 +2139,8 @@ impexp %>%
 expand.grid(m2=1:4,m1=1:4) %>%
   dplyr::filter(m1<m2) %>%
   dplyr::mutate(
-           model1=c("SV","CD","GR","RV")[m1],
-           model2=c("SV","CD","GR","RV")[m2]
+           model1=c("SV","CD","G","RV")[m1],
+           model2=c("SV","CD","G","RV")[m2]
          ) -> comps
            
 foreach (c=iter(comps,"row")) %do% {
@@ -2256,7 +2265,7 @@ poplim <- 1e5
 data.frame(
   SV=likStouffer1(mle.stouffer1),
   CD=likCompDest(mle.compdest),
-  GR=likGravity(mle.grav),
+  G=likGravity(mle.grav),
   RV=likRadiation1(mle.radiation1),
   N=N
 ) %>%
@@ -2269,8 +2278,8 @@ data.frame(
 expand.grid(m2=1:4,m1=1:4) %>%
   dplyr::filter(m1<m2) %>%
   dplyr::mutate(
-           model1=c("SV","CD","GR","RV")[m1],
-           model2=c("SV","CD","GR","RV")[m2]
+           model1=c("SV","CD","G","RV")[m1],
+           model2=c("SV","CD","G","RV")[m2]
          ) -> comps
 
 ```
@@ -2279,16 +2288,16 @@ expand.grid(m2=1:4,m1=1:4) %>%
 foreach (c=iter(comps,"row")) %do% {
   
   spatialLiks %>% 
-    dplyr::filter(model %in% c("SV","CD","GR","RV")) %>%
+    dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
     dplyr::mutate(
-      model=factor(model,levels=c("SV","CD","GR","RV"))
+      model=factor(model,levels=c("SV","CD","G","RV"))
     ) %>%
     dplyr::filter(model==c$model1) %>%
     dplyr::select(model,town,N,value) -> d1
   spatialLiks %>% 
-    dplyr::filter(model %in% c("SV","CD","GR","RV")) %>%
+    dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
     dplyr::mutate(
-      model=factor(model,levels=c("SV","CD","GR","RV"))
+      model=factor(model,levels=c("SV","CD","G","RV"))
     ) %>%
     dplyr::filter(model==c$model2) %>%
     dplyr::select(model,town,N,value) -> d2
@@ -2391,15 +2400,6 @@ print(lisamaps)
 
 The above plots are limited to cities of less than $`r poplim`$ souls, since larger cities have few or no fadeouts.
 
-
-# Next steps
-
-1. Exponential distance kernels
-1. qAICs and qBayes-weights in table 
-1. Random effects.
-1. Revisit $\sigma$ profile
-1. Revisit TSIR fitting (include residuals?)
-1. Include references for the various models.
 
 ```{r session-info,cache=FALSE}
 sessionInfo()
