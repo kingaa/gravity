@@ -1743,7 +1743,7 @@ pairs(~loglik+theta+phi+psi+tau1+tau2,
 
 # Radiation model
 
-$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
+$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}+\phi\,N_i$$
 
 ```{r radmat,cache=FALSE,purl=TRUE}
 bake(file="radmat.rds",{
@@ -1760,9 +1760,10 @@ bake(file="radmat.rds",{
 ```
 
 ```{r radiation-like}
-likfnRadiation <- function (theta, psi) {
+likfnRadiation <- function (theta, psi, phi) {
   theta <- exp(theta)
-  iota <- theta*(rr%*%ylag)
+  phi <- exp(phi)
+  iota <- theta*(rr%*%ylag)+phi*N
   lambda <- betaS*iota[relevant]^alpha
   -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
@@ -1772,7 +1773,7 @@ likfnRadiation <- function (theta, psi) {
 bake(file="radiation-mle.rds",{
   mle2(likfnRadiation,
     method="Nelder-Mead",
-    start=list(theta=log(1),psi=log(5)),
+    start=list(theta=log(1),psi=log(5),phi=log(0.00001)),
     control=list(trace=0,maxit=10000),
     skip.hessian=FALSE)
 }) -> fit
@@ -1787,7 +1788,7 @@ c(coef(fit),loglik=logLik(fit)) %>%
 
 ## Variant: radiation model with recipient included
 
-$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}$$
+$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}+\phi\,N_i$$
 
 ```{r radmat1,cache=FALSE,purl=TRUE}
 bake(file="radmat1.rds",{
@@ -1804,9 +1805,10 @@ bake(file="radmat1.rds",{
 ```
 
 ```{r radiation1-like}
-likfnRadiation1 <- function (theta, psi) {
+likfnRadiation1 <- function (theta, psi, phi) {
   theta <- exp(theta)
-  iota <- theta*(rr%*%ylag)
+  phi <- exp(phi)
+  iota <- theta*(rr%*%ylag)+phi*N
   lambda <- betaS*iota[relevant]^alpha
   -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
@@ -1816,7 +1818,7 @@ likfnRadiation1 <- function (theta, psi) {
 bake(file="radiation1-mle.rds",{
   mle2(likfnRadiation1,
     method="Nelder-Mead",
-    start=list(theta=log(1),psi=log(5)),
+    start=list(theta=log(1),psi=log(5),phi=log(0.00001)),
     control=list(trace=0,maxit=10000),
     skip.hessian=FALSE)
 }) -> fit
@@ -1998,8 +2000,7 @@ tab %>%
 ```
 
 ```{r latex_table,include=FALSE,purl=FALSE}
-library(xtable)
-library(tibble)
+library(Hmisc)
 tab %>%
   dplyr::select(model,loglik,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi) %>%
   rename(c(
