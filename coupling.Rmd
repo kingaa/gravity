@@ -1973,34 +1973,55 @@ mle.radiation %>% summaryRadiation() -> mle.radiation
 mle.radiation1 %>% summaryRadiation1() -> mle.radiation1
 
 dplyr::bind_rows(
-  gravity=mle.grav,
-  xia=mle.xia,
-  meanfield=mle.meanfield,
-  diffusion=mle.diffusion,
-  comp.dest=mle.compdest,
-  stouffer=mle.stouffer,
-  stouffer.variant=mle.stouffer1,
-  radiation=mle.radiation,
-  radiation.variant=mle.radiation1,
+  G=mle.grav,
+  X=mle.xia,
+  MF=mle.meanfield,
+  D=mle.diffusion,
+  CD=mle.compdest,
+  S=mle.stouffer,
+  SV=mle.stouffer1,
+  R=mle.radiation,
+  RV=mle.radiation1,
   .id="model"
 ) %>%
   arrange(-loglik) %>%
   mutate(rho=exp(rho),psi=exp(psi),qaic=-2*loglik/cHat[1]+2*npar,delta.qaic=qaic-min(qaic,na.rm=TRUE)) %>%
   mutate(theta=theta/log(10),phi=phi/log(10)) %>%
-  subset(select=c(model,loglik,qaic,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi)) %>%
-  rename(c(theta="$\\log_{10}{\\theta}$",cHat="$\\hat{c}$",phi="$\\log_{10}{\\phi}$",rho="$\\rho$",
-    psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
-    loglik="$\\ell$",qaic="$\\mathrm{QAIC}$",delta.qaic="$\\Delta\\!\\mathrm{QAIC}$")) -> tab
+  subset(select=c(model,loglik,qaic,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi)) -> tab
 
 tab %>%
+  rename(
+    c(theta="$\\log_{10}{\\theta}$",cHat="$\\hat{c}$",phi="$\\log_{10}{\\phi}$",rho="$\\rho$",
+      psi="$\\psi$",tau1="$\\tau_1$",tau2="$\\tau_2$",delta="$\\delta$",
+      loglik="$\\ell$",qaic="$\\mathrm{QAIC}$",delta.qaic="$\\Delta\\!\\mathrm{QAIC}$"))  %>%
   kable(digits=3)
 ```
 
-```{r latex_table,include=FALSE}
-library(Hmisc)
+```{r latex_table,include=FALSE,purl=FALSE}
+library(xtable)
+library(tibble)
 tab %>%
-  dplyr::select(c(1,2,4:12)) %>%
-  Hmisc::latex(title="table1")
+  dplyr::select(model,loglik,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi) %>%
+  rename(c(
+    theta="\\multicolumn{1}{c}{$\\log_{10}{\\theta}$}",
+    cHat="\\multicolumn{1}{c}{$\\hat{c}$}",
+    phi="\\multicolumn{1}{c}{$\\log_{10}{\\phi}$}",
+    rho="\\multicolumn{1}{c}{$\\rho$}",
+    psi="\\multicolumn{1}{c}{$\\psi$}",
+    tau1="\\multicolumn{1}{c}{$\\tau_1$}",
+    tau2="\\multicolumn{1}{c}{$\\tau_2$}",
+    delta="\\multicolumn{1}{c}{$\\delta$}",
+    loglik="\\multicolumn{1}{c}{$\\ell$}",
+    delta.qaic="\\multicolumn{1}{c}{$\\Delta\\!\\mathrm{QAIC}$}"
+  )) %>%
+  tibble::remove_rownames() %>%
+  tibble::column_to_rownames("model") %>%
+  xtable(
+    align="crrrrrrrrrr",
+    digits=c(0,1,2,1,2,1,2,2,2,2,2)
+  ) -> xtab
+print(xtab,sanitize.colnames.function=identity,floating=FALSE,
+      file="table1.tex")
 ```
 
 # Diagnostics
@@ -2100,7 +2121,7 @@ impexp %>%
   dplyr::select(town,N,model,export=erate,import=irate) %>%
   dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
   dplyr::mutate(
-           model=factor(model,levels=c("SV","CD","G","RV"))
+           model=factor(model,levels=c("SV","RV","CD","G"))
          ) %>%
   tidyr::gather(rate,value,import,export) %>%
   ggplot(aes(x=N,y=value))+
@@ -2290,14 +2311,14 @@ foreach (c=iter(comps,"row")) %do% {
   spatialLiks %>% 
     dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
     dplyr::mutate(
-      model=factor(model,levels=c("SV","CD","G","RV"))
+      model=factor(model,levels=c("SV","RV","CD","G"))
     ) %>%
     dplyr::filter(model==c$model1) %>%
     dplyr::select(model,town,N,value) -> d1
   spatialLiks %>% 
     dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
     dplyr::mutate(
-      model=factor(model,levels=c("SV","CD","G","RV"))
+      model=factor(model,levels=c("SV","RV","CD","G"))
     ) %>%
     dplyr::filter(model==c$model2) %>%
     dplyr::select(model,town,N,value) -> d2
