@@ -2000,7 +2000,8 @@ tab %>%
 ```
 
 ```{r latex_table,include=FALSE,purl=FALSE}
-library(Hmisc)
+library(xtable)
+library(tibble)
 tab %>%
   dplyr::select(model,loglik,cHat,delta.qaic,theta,phi,rho,tau1,tau2,delta,psi) %>%
   rename(c(
