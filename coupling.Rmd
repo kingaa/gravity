@@ -1740,10 +1740,9 @@ pairs(~loglik+theta+phi+psi+tau1+tau2,
   subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
 ```
 
-
 # Radiation model
 
-$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}+\phi\,N_i$$
+$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
 
 ```{r radmat,cache=FALSE,purl=TRUE}
 bake(file="radmat.rds",{
@@ -1760,10 +1759,9 @@ bake(file="radmat.rds",{
 ```
 
 ```{r radiation-like}
-likfnRadiation <- function (theta, psi, phi) {
+likfnRadiation <- function (theta, psi) {
   theta <- exp(theta)
-  phi <- exp(phi)
-  iota <- theta*(rr%*%ylag)+phi*N
+  iota <- theta*(rr%*%ylag)
   lambda <- betaS*iota[relevant]^alpha
   -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
@@ -1773,7 +1771,7 @@ likfnRadiation <- function (theta, psi, phi) {
 bake(file="radiation-mle.rds",{
   mle2(likfnRadiation,
     method="Nelder-Mead",
-    start=list(theta=log(1),psi=log(5),phi=log(0.00001)),
+    start=list(theta=log(1),psi=log(5)),
     control=list(trace=0,maxit=10000),
     skip.hessian=FALSE)
 }) -> fit
@@ -1788,7 +1786,7 @@ c(coef(fit),loglik=logLik(fit)) %>%
 
 ## Variant: radiation model with recipient included
 
-$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}+\phi\,N_i$$
+$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}$$
 
 ```{r radmat1,cache=FALSE,purl=TRUE}
 bake(file="radmat1.rds",{
@@ -1805,10 +1803,9 @@ bake(file="radmat1.rds",{
 ```
 
 ```{r radiation1-like}
-likfnRadiation1 <- function (theta, psi, phi) {
+likfnRadiation1 <- function (theta, psi) {
   theta <- exp(theta)
-  phi <- exp(phi)
-  iota <- theta*(rr%*%ylag)+phi*N
+  iota <- theta*(rr%*%ylag)
   lambda <- betaS*iota[relevant]^alpha
   -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
 }
@@ -1818,7 +1815,7 @@ likfnRadiation1 <- function (theta, psi, phi) {
 bake(file="radiation1-mle.rds",{
   mle2(likfnRadiation1,
     method="Nelder-Mead",
-    start=list(theta=log(1),psi=log(5),phi=log(0.00001)),
+    start=list(theta=log(1),psi=log(5)),
     control=list(trace=0,maxit=10000),
     skip.hessian=FALSE)
 }) -> fit
@@ -1829,6 +1826,44 @@ summary(fit)
 logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
   as.list() %>% as.data.frame() -> mle.radiation1
+```
+
+
+# Extended radiation model
+
+We extend the radiation variant model by allowing a background importation rate proportional to city size.
+
+$$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}+\phi\,N_i$$
+
+```{r xradmat1,cache=FALSE,purl=TRUE}
+readRDS("radmat1.rds") -> rr
+```
+
+```{r xrad1-like}
+likfnXRad1 <- function (theta, psi, phi) {
+  theta <- exp(theta)
+  phi <- exp(phi)
+  iota <- theta*(rr%*%ylag)+phi*N
+  lambda <- betaS*iota[relevant]^alpha
+  -sum(dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE))
+}
+```
+
+```{r xrad1-mle,cache=FALSE}
+bake(file="xrad1-mle.rds",{
+  mle2(likfnXRad1,
+    method="Nelder-Mead",
+    start=list(theta=log(1),psi=log(5),phi=log(0.00001)),
+    control=list(trace=0,maxit=10000),
+    skip.hessian=FALSE)
+}) -> fit
+```
+
+```{r xrad1-results,purl=FALSE}
+summary(fit)
+logLik(fit)
+c(coef(fit),loglik=logLik(fit)) %>%
+  as.list() %>% as.data.frame() -> mle.xrad1
 ```
 
 
@@ -1964,6 +1999,20 @@ summaryRadiation1 <- function (mle) {
     cbind(mle)
 }
 
+summaryXRad1 <- function (mle) {
+  npar <- 3
+  readRDS("radmat1.rds") -> rr
+  mle %$% {
+    theta <- exp(theta)
+    phi <- exp(phi)
+    iota <- theta*(rr%*%ylag)+phi*N
+    lambda <- betaS*iota[relevant]^alpha
+    var <- lambda+lambda*lambda*exp(psi)
+    data.frame(npar=npar,cHat=sum((obs-lambda)^2/var)/(length(obs)-npar))
+  } %>% 
+    cbind(mle)
+}
+
 mle.grav %>% summaryGravity() -> mle.grav
 mle.xia %>% summaryXia() -> mle.xia
 mle.meanfield %>% summaryMeanField() -> mle.meanfield
@@ -1973,6 +2022,7 @@ mle.stouffer %>% summaryStouffer() -> mle.stouffer
 mle.stouffer1 %>% summaryStouffer1() -> mle.stouffer1
 mle.radiation %>% summaryRadiation() -> mle.radiation
 mle.radiation1 %>% summaryRadiation1() -> mle.radiation1
+mle.xrad1 %>% summaryXRad1() -> mle.xrad1
 
 dplyr::bind_rows(
   G=mle.grav,
@@ -1984,6 +2034,7 @@ dplyr::bind_rows(
   SV=mle.stouffer1,
   R=mle.radiation,
   RV=mle.radiation1,
+  XR=mle.xrad1,
   .id="model"
 ) %>%
   arrange(-loglik) %>%
@@ -2090,6 +2141,13 @@ mle.radiation1 %$% {
   theta <- exp(theta)
   theta*rr
 } -> RVmat
+
+#Extended radiation
+mle.xrad1 %$% {
+  readRDS("radmat1.rds") -> rr
+  theta <- exp(theta)
+  theta*rr
+} -> XRmat
 ```
 
 ```{r import_export,purl=FALSE}
@@ -2106,6 +2164,7 @@ data.frame(
   CD_export=CDmat %>% colMeans(),
   RV_export=RVmat %>% colMeans(),
   R_export=RDmat %>% colMeans(),
+  XR_export=XRmat %>% colMeans(),
   N=N
 ) %>% 
   name_rows() %>%
@@ -2121,9 +2180,9 @@ data.frame(
 ```{r imp_exp_by_size,fig.height=6.83,purl=FALSE}
 impexp %>%
   dplyr::select(town,N,model,export=erate,import=irate) %>%
-  dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
+  dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
   dplyr::mutate(
-           model=factor(model,levels=c("SV","RV","CD","G"))
+           model=factor(model,levels=c("SV","XR","CD","G"))
          ) %>%
   tidyr::gather(rate,value,import,export) %>%
   ggplot(aes(x=N,y=value))+
@@ -2146,15 +2205,15 @@ gb %>%
 ```{r ratemaps,message=FALSE,results="hide",purl=FALSE}
 impexp %>%
   dplyr::select(town,model,export=erate,import=irate) %>%
-  dplyr::filter(model %in% c("RV","G","CD","SV")) %>%
+  dplyr::filter(model %in% c("XR","G","CD","SV")) %>%
   tidyr::gather(variable,value,export,import) %>%
   acast(model~town~variable,value.var="value") %>%
   aaply(c(2,3),function(x)outer(x,x,FUN="-")) %>%
   melt() %>%
   dplyr::rename(town=X1,variable=X2,m1=Var3,m2=Var4) %>% 
   mutate(
-    m1=ordered(m1,levels=c("RV","G","CD","SV")),
-    m2=ordered(m2,levels=c("RV","G","CD","SV"))
+    m1=ordered(m1,levels=c("XR","G","CD","SV")),
+    m2=ordered(m2,levels=c("XR","G","CD","SV"))
   ) %>%
   dplyr::filter(m1 > m2) %>% 
   dplyr::left_join(coords,by="town") -> ied
@@ -2162,8 +2221,8 @@ impexp %>%
 expand.grid(m2=1:4,m1=1:4) %>%
   dplyr::filter(m1<m2) %>%
   dplyr::mutate(
-           model1=c("SV","CD","G","RV")[m1],
-           model2=c("SV","CD","G","RV")[m2]
+           model1=c("SV","CD","G","XR")[m1],
+           model2=c("SV","CD","G","XR")[m2]
          ) -> comps
            
 foreach (c=iter(comps,"row")) %do% {
@@ -2270,11 +2329,12 @@ likStouffer1 <- function (mle) {
   }
 }
 
-likRadiation1 <- function (mle) {
+likXRad1 <- function (mle) {
   readRDS("radmat1.rds") -> rr
   mle %$% {
     theta <- exp(theta)
-    iota <- theta*(rr%*%ylag)
+    phi <- exp(phi)
+    iota <- theta*(rr%*%ylag)+phi*N
     lambda <- betaS*iota[relevant]^alpha
     ll <- dnbinom(x=obs,mu=lambda,size=exp(-psi),log=TRUE)
     rv <- array(0,dim=dim(iota),dimnames=dimnames(iota))
@@ -2289,7 +2349,7 @@ data.frame(
   SV=likStouffer1(mle.stouffer1),
   CD=likCompDest(mle.compdest),
   G=likGravity(mle.grav),
-  RV=likRadiation1(mle.radiation1),
+  XR=likXRad1(mle.xrad1),
   N=N
 ) %>%
   name_rows() %>%
@@ -2301,8 +2361,8 @@ data.frame(
 expand.grid(m2=1:4,m1=1:4) %>%
   dplyr::filter(m1<m2) %>%
   dplyr::mutate(
-           model1=c("SV","CD","G","RV")[m1],
-           model2=c("SV","CD","G","RV")[m2]
+           model1=c("SV","CD","G","XR")[m1],
+           model2=c("SV","CD","G","XR")[m2]
          ) -> comps
 
 ```
@@ -2311,16 +2371,16 @@ expand.grid(m2=1:4,m1=1:4) %>%
 foreach (c=iter(comps,"row")) %do% {
   
   spatialLiks %>% 
-    dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
+    dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
     dplyr::mutate(
-      model=factor(model,levels=c("SV","RV","CD","G"))
+      model=factor(model,levels=c("SV","XR","CD","G"))
     ) %>%
     dplyr::filter(model==c$model1) %>%
     dplyr::select(model,town,N,value) -> d1
   spatialLiks %>% 
-    dplyr::filter(model %in% c("SV","CD","G","RV")) %>%
+    dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
     dplyr::mutate(
-      model=factor(model,levels=c("SV","RV","CD","G"))
+      model=factor(model,levels=c("SV","XR","CD","G"))
     ) %>%
     dplyr::filter(model==c$model2) %>%
     dplyr::select(model,town,N,value) -> d2
