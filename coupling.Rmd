@@ -2158,6 +2158,7 @@ data.frame(
   CD_import=CDmat %>% rowMeans(),
   RV_import=RVmat %>% rowMeans(),
   R_import=RDmat %>% rowMeans(),
+  XR_import=XRmat %>% rowMeans(),
   SV_export=SVmat %>% colMeans(),
   S_export=STmat %>% colMeans(),
   G_export=GRmat %>% colMeans(),
@@ -2187,8 +2188,23 @@ impexp %>%
   tidyr::gather(rate,value,import,export) %>%
   ggplot(aes(x=N,y=value))+
   geom_point(alpha=0.3,size=0.1)+
-  scale_x_log10()+
-  scale_y_log10()+
+  scale_x_log10(breaks=c(1e3,1e4,1e5,1e6),
+                labels=c(
+                  expression(10^{3}),
+                  expression(10^{4}),
+                  expression(10^{5}),
+                  expression(10^{6})
+                  )
+                )+
+  scale_y_log10(breaks=c(1e-6,1e-5,1e-4,1e-3),
+                labels=c(
+                  expression(10^{-6}),
+                  expression(10^{-5}),
+                  expression(10^{-4}),
+                  expression(10^{-3})
+                  )
+                )+
+  labs(x="community size (inhabitants)",y="rate (per inhabitant per biweek)")+
   facet_grid(model~rate)
 ```
 
@@ -2249,6 +2265,47 @@ foreach (c=iter(comps,"row")) %do% {
 } -> ratemaps
 
 print(ratemaps)
+```
+
+```{r sv_g_imp_exp,include=FALSE,purl=FALSE}
+ied %>%
+  dplyr::filter(m1=="SV" & m2=="G") %>%
+  arrange(variable,abs(value)) -> d
+
+d %>%
+  summarize(min=min(value),max=max(value)) -> dr
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  geom_point(
+    data=dplyr::filter(d,variable=="import"),
+    aes(x=long,y=lat,color=value),
+    size=1
+  )+
+  guides(alpha=FALSE)+
+#  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
+  scale_color_gradient2(mid="gray90")+
+  labs(color="import rate",x="",y="")+
+  theme(axis.text=element_blank()) -> sv_g_imp
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  geom_point(
+    data=dplyr::filter(d,variable=="export"),
+    aes(x=long,y=lat,color=value),
+    size=1
+  )+
+  guides(alpha=FALSE)+
+#  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
+  scale_color_gradient2(mid="gray90")+
+  labs(color="export rate",x="",y="")+
+  theme(axis.text=element_blank()) -> sv_g_exp
 ```
 
 ## Fadeout residuals
@@ -2478,10 +2535,86 @@ foreach (c=iter(comps[c(2,4),],"row")) %do% {
 } -> lisamaps
 
 print(lisamaps)
-
 ```
 
-The above plots are limited to cities of less than $`r poplim`$ souls, since larger cities have few or no fadeouts.
+```{r sv_g_lisa,include=FALSE,purl=FALSE}
+spatialLiks %>% dplyr::filter(model=="SV") -> d1
+spatialLiks %>% dplyr::filter(model=="G") -> d2
+dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+                 suffix=c("_1","_2")) %>%
+  mutate(diff=value_1-value_2) -> dd
+
+with(dd,
+     ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+     ) -> ddlisa
+
+dd %>%
+  dplyr::mutate(
+           corr=ddlisa$correlation,
+           mean=ddlisa$mean,
+           p=ddlisa$p
+         ) %>%
+  dplyr::filter(p<0.05) -> dd
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  geom_point(
+    data=dd,
+    aes(x=long,y=lat,color=diff,alpha=0.5),
+    size=1
+  )+
+  guides(alpha=FALSE)+
+  scale_color_gradient2(mid="gray90")+
+  labs(x="",y="",color="")+
+  theme(axis.text=element_blank()) -> sv_g_lisa
+```
+
+```{r cd_g_lisa,include=FALSE,purl=FALSE}
+spatialLiks %>% dplyr::filter(model=="CD") -> d1
+spatialLiks %>% dplyr::filter(model=="G") -> d2
+dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+                 suffix=c("_1","_2")) %>%
+  mutate(diff=value_1-value_2) -> dd
+
+with(dd,
+     ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+     ) -> ddlisa
+
+dd %>%
+  dplyr::mutate(
+           corr=ddlisa$correlation,
+           mean=ddlisa$mean,
+           p=ddlisa$p
+         ) %>%
+  dplyr::filter(p<0.05) -> dd
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  geom_point(
+    data=dd,
+    aes(x=long,y=lat,color=diff,alpha=0.5),
+    size=1
+  )+
+  guides(alpha=FALSE)+
+  scale_color_gradient2(mid="gray90")+
+  labs(x="",y="",color="")+
+  theme(axis.text=element_blank()) -> cd_g_lisa
+```
+
+```{r fig3,include=FALSE,purl=FALSE,fig.height=10,fig.width=10}
+library(cowplot)
+plot_grid(sv_g_lisa,cd_g_lisa,sv_g_exp,sv_g_imp,
+          labels=c("A","B","C","D"),
+          label_size=24,ncol=2)
+```
+
+The above plots are limited to cities of less than $`r poplim`$ inhabitants, since larger cities have few or no fadeouts.
 
 
 ```{r session-info,cache=FALSE}
