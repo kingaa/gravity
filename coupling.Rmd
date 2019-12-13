@@ -1,5 +1,6 @@
 ---
-title: "Spatial coupling in measles via fade-out survival analysis"
+title: "Comparison of alternative models of human movement and the spread of disease"
+subtitle: "Technical Appendix"
 csl: ecology.csl
 output:
   html_document:
