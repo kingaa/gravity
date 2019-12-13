@@ -10,7 +10,7 @@ RSCRIPT = Rscript --vanilla
 
 default: gravity2.pdf
 
-gravity2.pdf: coupling.html
+gravity2.pdf: supplement.html
 
 %.html: %.Rmd
 	PATH=/usr/lib/rstudio/bin/pandoc:$$PATH \
