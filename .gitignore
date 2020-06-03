@@ -1,0 +1,9 @@
+cache
+figure
+.Rproj.user
+*.synctex.gz
+*.log
+*.blg
+*.bbl
+*.aux
+*.out
