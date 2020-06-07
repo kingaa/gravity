@@ -212,9 +212,9 @@ bake(file="distances.rds",{
 
 ## Apply TSIR model to the individual towns.
 
-```{r startDoMC,cache=FALSE,include=FALSE,purl=TRUE}
-  library(doMC)
-  registerDoMC()
+```{r startDoParallel,cache=FALSE,include=FALSE,purl=TRUE}
+  library(doParallel)
+  registerDoParallel()
 ```
 
 ### Susceptible reconstruction.
@@ -459,8 +459,8 @@ if (file.exists("CLUSTER")) {
   cl <- startMPIcluster(ncpu,verbose=TRUE,logdir="/tmp")
   registerDoMPI(cl)
 } else {
-  library(doMC)
-  registerDoMC()
+  library(doParallel)
+  registerDoParallel()
 }
 ```
 

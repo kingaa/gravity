@@ -1,6 +1,6 @@
 
-R version 3.6.1 (2019-07-05) -- "Action of the Toes"
-Copyright (C) 2019 The R Foundation for Statistical Computing
+R version 4.0.0 (2020-04-24) -- "Arbor Day"
+Copyright (C) 2020 The R Foundation for Statistical Computing
 Platform: x86_64-pc-linux-gnu (64-bit)
 
 R is free software and comes with ABSOLUTELY NO WARRANTY.
@@ -20,7 +20,7 @@ Type 'q()' to quit R.
 > params <-
 + list(prefix = "coupling")
 > 
-> ## ----prelims,cache=FALSE,purl=TRUE---------------------------------------
+> ## ----prelims,cache=FALSE,purl=TRUE--------------------------------------------
 > options(
 +   keep.source=TRUE,
 +   stringsAsFactors=FALSE,
@@ -42,9 +42,16 @@ Type 'q()' to quit R.
 Loading required package: stats4
 > library(nloptr)
 > library(pomp)
-Welcome to pomp version 2!
+Welcome to pomp!
+As of version 2.7.1.0, important changes have been made to the
+default settings of the particle filtering algorithms in
+‘pfilter’, ‘mif2’, ‘pmcmc’, ‘bsmc2’.
+These changes are not backward compatible.
+See the package NEWS for the details.
+
 For information on upgrading your pomp version < 2 code, see the
-‘pomp version 2 upgrade guide’ at https://kingaa.github.io/pomp/.
+“pomp version 2 upgrade guide” at https://kingaa.github.io/pomp/.
+
 > library(ggplot2)
 > library(scales)
 > library(sp)
@@ -52,7 +59,7 @@ For information on upgrading your pomp version < 2 code, see the
 > theme_set(theme_bw())
 > 
 > 
-> ## ----clean-data,purl=TRUE------------------------------------------------
+> ## ----clean-data,purl=TRUE-----------------------------------------------------
 > stew(file="clean_data.rda",{
 +   library(aakmisc)
 +   
@@ -77,7 +84,7 @@ For information on upgrading your pomp version < 2 code, see the
 > 
 > 
 > 
-> ## ----coords,purl=TRUE----------------------------------------------------
+> ## ----coords,purl=TRUE---------------------------------------------------------
 > bake(file="coords.rds",{
 +   library(aakmisc)
 +   startTunnel()
@@ -87,7 +94,7 @@ For information on upgrading your pomp version < 2 code, see the
 + }) -> coords
 > 
 > 
-> ## ----distances,purl=TRUE-------------------------------------------------
+> ## ----distances,purl=TRUE------------------------------------------------------
 > bake(file="distances.rds",{
 +   library(aakmisc)
 +   library(geosphere)
@@ -100,13 +107,13 @@ For information on upgrading your pomp version < 2 code, see the
 + }) -> distances
 > 
 > 
-> ## ----startDoMC,cache=FALSE,include=FALSE,purl=TRUE-----------------------
->   library(doMC)
+> ## ----startDoParallel,cache=FALSE,include=FALSE,purl=TRUE----------------------
+>   library(doParallel)
 Loading required package: parallel
->   registerDoMC()
+>   registerDoParallel()
 > 
 > 
-> ## ----under-reporting,purl=TRUE-------------------------------------------
+> ## ----under-reporting,purl=TRUE------------------------------------------------
 > bake(file="under-reporting.rds",{
 +   foreach (d=dlply(dat,~town),
 +            .combine=rbind,.inorder=FALSE,
@@ -122,7 +129,7 @@ Loading required package: parallel
 + }) -> dat
 > 
 > 
-> ## ----susceptible-reconstruction,purl=TRUE--------------------------------
+> ## ----susceptible-reconstruction,purl=TRUE-------------------------------------
 > bake(file="susc-reconst.rds",{
 +   foreach (d=dlply(dat,~town),
 +            .combine=rbind,.inorder=FALSE,
@@ -135,7 +142,7 @@ Loading required package: parallel
 + }) -> dat
 > 
 > 
-> ## ----make-data-matrix,purl=TRUE------------------------------------------
+> ## ----make-data-matrix,purl=TRUE-----------------------------------------------
 > bake(file="data-matrix.rds",{
 +   dat %>%
 +     ddply(~town,mutate,
@@ -147,7 +154,7 @@ Loading required package: parallel
 + }) -> dat
 > 
 > 
-> ## ----exclude-weird-towns,purl=TRUE---------------------------------------
+> ## ----exclude-weird-towns,purl=TRUE--------------------------------------------
 > bake(file="exclusions.rds",{
 +   dat %>%
 +     ddply(~town,summarize,
@@ -160,7 +167,7 @@ Loading required package: parallel
 [1] 233
 > 
 > 
-> ## ----sigma-profile,purl=TRUE---------------------------------------------
+> ## ----sigma-profile,purl=TRUE--------------------------------------------------
 > sigma1dev <- function (dat, sigma) {
 +   slag <- with(dat,sigma*Ps+zlag)
 +   fit <- glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(log(slag)),
@@ -183,7 +190,7 @@ Loading required package: parallel
 + }) -> sigmaProf
 > 
 > 
-> ## ----sigma-bar,purl=TRUE-------------------------------------------------
+> ## ----sigma-bar,purl=TRUE------------------------------------------------------
 > bake(file="sigma-bar.rds",{
 +   dat %>% subset(!(town%in%excludes)) -> dat1
 +   fit <- optim(par=0.037,lower=0.03,upper=0.10,
@@ -201,7 +208,7 @@ Loading required package: parallel
 > 
 > 
 > 
-> ## ----fit-tsir,purl=TRUE--------------------------------------------------
+> ## ----fit-tsir,purl=TRUE-------------------------------------------------------
 > bake(file="tsir-fits.rds",{
 +   coefnames <- c(sprintf("seas%d",1:26),"log(Ilag)","I(1/Ilag)")
 +   newcoefnames <- c(sprintf("log.beta%02d",1:26),"alpha","m.alpha")
@@ -246,7 +253,7 @@ Loading required package: parallel
 > 
 > 
 > 
-> ## ----gravity-pre,purl=TRUE-----------------------------------------------
+> ## ----gravity-pre,purl=TRUE----------------------------------------------------
 > readRDS("tsir-fits.rds") -> dat
 > dat %>% acast(town~year+biweek,value.var="ylag") -> ylag
 > dat %>% acast(town~year+biweek,value.var="Slag") -> slag
@@ -276,27 +283,27 @@ Loading required package: parallel
 > betaS <- beta[relevant]*slag[relevant]
 > 
 > 
-> ## ----startMPI,cache=FALSE,include=FALSE,purl=TRUE------------------------
+> ## ----startMPI,cache=FALSE,include=FALSE,purl=TRUE-----------------------------
 > if (file.exists("CLUSTER")) {
 +   scan("CLUSTER",what=integer(0)) -> ncpu
 +   library(doMPI)
 +   cl <- startMPIcluster(ncpu,verbose=TRUE,logdir="/tmp")
 +   registerDoMPI(cl)
 + } else {
-+   library(doMC)
-+   registerDoMC()
++   library(doParallel)
++   registerDoParallel()
 + }
 Read 1 item
 Loading required package: Rmpi
 Master processor name: theorygroup01; nodename: theorygroup01
 Size of MPI universe: 1
 Spawning 250 workers using the command:
-  /export/local/apps/R/R-3.6.1/lib64/R/bin/Rscript /userdata/kingaa/R/x86_64-pc-linux-gnu-library/3.6/doMPI/RMPIworker.R WORKDIR=/home/kingaa/gravity LOGDIR=/tmp MAXCORES=1 COMM=3 INTERCOMM=4 MTAG=10 WTAG=11 INCLUDEMASTER=TRUE BCAST=TRUE VERBOSE=TRUE
+  /export/local/apps/R/R-4.0.0/lib64/R/bin/Rscript /userdata/kingaa/R/x86_64-pc-linux-gnu-library/4.0/doMPI/RMPIworker.R WORKDIR=/home/kingaa/gravity LOGDIR=/tmp MAXCORES=1 COMM=3 INTERCOMM=4 MTAG=10 WTAG=11 INCLUDEMASTER=TRUE BCAST=TRUE VERBOSE=TRUE
 App launch reported: 12 (out of 12) daemons - 229 (out of 250) procs
 	250 slaves are spawned successfully. 0 failed.
 > 
 > 
-> ## ----gravity-like,purl=TRUE----------------------------------------------
+> ## ----gravity-like,purl=TRUE---------------------------------------------------
 > likfnGravity <- function (theta, phi, rho, psi, tau1, tau2) {
 +   theta <- exp(theta)
 +   phi <- exp(phi)
@@ -308,7 +315,7 @@ App launch reported: 12 (out of 12) daemons - 229 (out of 250) procs
 + }
 > 
 > 
-> ## ----gravity-profile-2D,cache=FALSE,purl=TRUE----------------------------
+> ## ----gravity-profile-2D,cache=FALSE,purl=TRUE---------------------------------
 > bake(file="gravity.rds",{
 +   
 +   grd <- profileDesign(
@@ -388,7 +395,7 @@ App launch reported: 12 (out of 12) daemons - 229 (out of 250) procs
 list()
 > 
 > 
-> ## ----gravity-mle,cache=FALSE---------------------------------------------
+> ## ----gravity-mle,cache=FALSE--------------------------------------------------
 > bake("gravity-mle.rds",{
 +   
 +   results %>%
@@ -413,7 +420,7 @@ list()
 > 
 > 
 > 
-> ## ----xia-like,purl=TRUE--------------------------------------------------
+> ## ----xia-like,purl=TRUE-------------------------------------------------------
 > likfnXia <- function (theta, phi, rho, psi, tau1, tau2) {
 +   theta <- exp(theta)
 +   phi <- exp(phi)
@@ -425,7 +432,7 @@ list()
 + }
 > 
 > 
-> ## ----xia-profile-2D,cache=FALSE,purl=TRUE--------------------------------
+> ## ----xia-profile-2D,cache=FALSE,purl=TRUE-------------------------------------
 > bake(file="xia.rds",{
 +   
 +   grd <- expand.grid(
@@ -460,7 +467,7 @@ list()
 + }) -> results
 > 
 > 
-> ## ----xia-mle,cache=FALSE-------------------------------------------------
+> ## ----xia-mle,cache=FALSE------------------------------------------------------
 > bake("xia-mle.rds",{
 +   results %>%
 +     extract(!sapply(results,inherits,"try-error")) %>%
@@ -484,7 +491,7 @@ list()
 > 
 > 
 > 
-> ## ----meanfield-like,purl=TRUE--------------------------------------------
+> ## ----meanfield-like,purl=TRUE-------------------------------------------------
 > likfnMeanField <- function (theta, phi, psi) {
 +   theta <- exp(theta)
 +   phi <- exp(phi)
@@ -495,7 +502,7 @@ list()
 + }
 > 
 > 
-> ## ----meanfield-optim,cache=FALSE,purl=TRUE-------------------------------
+> ## ----meanfield-optim,cache=FALSE,purl=TRUE------------------------------------
 > bake(file="meanfield.rds",{
 + 
 +   grd <- sobolDesign(
@@ -575,7 +582,7 @@ list()
 > 
 > 
 > 
-> ## ----meanfield-mle,cache=FALSE-------------------------------------------
+> ## ----meanfield-mle,cache=FALSE------------------------------------------------
 > bake("meanfield-mle.rds",{
 +   
 +   results %>%
@@ -598,7 +605,7 @@ list()
 > 
 > 
 > 
-> ## ----diffusion-like,purl=TRUE--------------------------------------------
+> ## ----diffusion-like,purl=TRUE-------------------------------------------------
 > likfnDiffusion <- function (theta, phi, rho, psi) {
 +   theta <- exp(theta)
 +   phi <- exp(phi)
@@ -610,7 +617,7 @@ list()
 + }
 > 
 > 
-> ## ----diffusion-profile-2D,cache=FALSE,purl=TRUE--------------------------
+> ## ----diffusion-profile-2D,cache=FALSE,purl=TRUE-------------------------------
 > bake(file="diffusion.rds",{
 + 
 +   grd <- profileDesign(
@@ -689,7 +696,7 @@ list()
 list()
 > 
 > 
-> ## ----diffusion-mle,cache=FALSE-------------------------------------------
+> ## ----diffusion-mle,cache=FALSE------------------------------------------------
 > bake("diffusion-mle.rds",{
 +   
 +   results %>%
@@ -714,7 +721,7 @@ list()
 > 
 > 
 > 
-> ## ----compdest-like,purl=TRUE---------------------------------------------
+> ## ----compdest-like,purl=TRUE--------------------------------------------------
 > iii <- 1-diag(length(N))
 > 
 > likfnCompDest <- function (theta, phi, rho, psi, tau1, tau2, delta) {
@@ -729,7 +736,7 @@ list()
 + }
 > 
 > 
-> ## ----compdest-profile-2D,cache=FALSE,purl=TRUE---------------------------
+> ## ----compdest-profile-2D,cache=FALSE,purl=TRUE--------------------------------
 > bake(file="compdest.rds",{
 +   
 +   grd <- profileDesign(
@@ -809,7 +816,7 @@ list()
 list()
 > 
 > 
-> ## ----compdest-mle,cache=FALSE--------------------------------------------
+> ## ----compdest-mle,cache=FALSE-------------------------------------------------
 > bake("compdest-mle.rds",{
 +   
 +   results %>%
@@ -830,7 +837,7 @@ list()
 + }) -> mle.compdest
 > 
 > 
-> ## ----compdest-results,purl=TRUE------------------------------------------
+> ## ----compdest-results,purl=TRUE-----------------------------------------------
 > results %>%
 +   extract(sapply(results,inherits,"try-error")) %>%
 +   sapply(as.character) %>%
@@ -851,7 +858,7 @@ list()
 > 
 > 
 > 
-> ## ----compdest-profile-delta,cache=FALSE,purl=TRUE------------------------
+> ## ----compdest-profile-delta,cache=FALSE,purl=TRUE-----------------------------
 > bake(file="compdest_delta.rds",{
 +   
 +   grd <- profileDesign(
@@ -932,7 +939,7 @@ list()
 > 
 > 
 > 
-> ## ----compdest-profile-tau1,cache=FALSE,purl=TRUE-------------------------
+> ## ----compdest-profile-tau1,cache=FALSE,purl=TRUE------------------------------
 > bake(file="compdest_tau1.rds",{
 +   
 +   grd <- profileDesign(
@@ -1013,7 +1020,7 @@ list()
 > 
 > 
 > 
-> ## ----compdest-profile-tau2,cache=FALSE,purl=TRUE-------------------------
+> ## ----compdest-profile-tau2,cache=FALSE,purl=TRUE------------------------------
 > bake(file="compdest_tau2.rds",{
 +   
 +   grd <- profileDesign(
@@ -1094,7 +1101,7 @@ list()
 > 
 > 
 > 
-> ## ----rankmat,cache=FALSE,purl=TRUE---------------------------------------
+> ## ----rankmat,cache=FALSE,purl=TRUE--------------------------------------------
 > bake(file="rankmat.rds",{
 +   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
 +   for (i in seq_along(N)) {
@@ -1107,7 +1114,7 @@ list()
 + }) -> rr
 > 
 > 
-> ## ----stouffer-like,purl=TRUE---------------------------------------------
+> ## ----stouffer-like,purl=TRUE--------------------------------------------------
 > likfnStouffer <- function (theta, phi, tau1, tau2, psi) {
 +   theta <- exp(theta)
 +   phi <- exp(phi)
@@ -1117,7 +1124,7 @@ list()
 + }
 > 
 > 
-> ## ----stouffer-profile-2D,cache=FALSE,purl=TRUE---------------------------
+> ## ----stouffer-profile-2D,cache=FALSE,purl=TRUE--------------------------------
 > bake(file="stouffer.rds",{
 +   
 +   grd <- expand.grid(
@@ -1150,7 +1157,7 @@ list()
 + }) -> results
 > 
 > 
-> ## ----stouffer-mle,cache=FALSE--------------------------------------------
+> ## ----stouffer-mle,cache=FALSE-------------------------------------------------
 > bake("stouffer-mle.rds",{
 +   
 +   results %>%
@@ -1175,7 +1182,7 @@ list()
 > 
 > 
 > 
-> ## ----rankmat1,cache=FALSE,purl=TRUE--------------------------------------
+> ## ----rankmat1,cache=FALSE,purl=TRUE-------------------------------------------
 > bake(file="rankmat1.rds",{
 +   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
 +   for (i in seq_along(N)) {
@@ -1188,7 +1195,7 @@ list()
 + }) -> rr
 > 
 > 
-> ## ----stouffer1-like,purl=TRUE--------------------------------------------
+> ## ----stouffer1-like,purl=TRUE-------------------------------------------------
 > likfnStouffer1 <- function (theta, phi, tau1, tau2, psi) {
 +   theta <- exp(theta)
 +   phi <- exp(phi)
@@ -1198,7 +1205,7 @@ list()
 + }
 > 
 > 
-> ## ----stouffer1-profile-2D,cache=FALSE,purl=TRUE--------------------------
+> ## ----stouffer1-profile-2D,cache=FALSE,purl=TRUE-------------------------------
 > bake(file="stouffer1.rds",{
 +   
 +   grd <- expand.grid(
@@ -1231,7 +1238,7 @@ list()
 + }) -> results
 > 
 > 
-> ## ----stouffer1-mle,cache=FALSE-------------------------------------------
+> ## ----stouffer1-mle,cache=FALSE------------------------------------------------
 > bake("stouffer1-mle.rds",{
 +   
 +   results %>%
@@ -1256,7 +1263,7 @@ list()
 > 
 > 
 > 
-> ## ----radmat,cache=FALSE,purl=TRUE----------------------------------------
+> ## ----radmat,cache=FALSE,purl=TRUE---------------------------------------------
 > bake(file="radmat.rds",{
 +   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
 +   for (i in seq_along(N)) {
@@ -1270,7 +1277,7 @@ list()
 + }) -> rr
 > 
 > 
-> ## ----radiation-like------------------------------------------------------
+> ## ----radiation-like-----------------------------------------------------------
 > likfnRadiation <- function (theta, psi) {
 +   theta <- exp(theta)
 +   iota <- theta*(rr%*%ylag)
@@ -1279,7 +1286,7 @@ list()
 + }
 > 
 > 
-> ## ----radiation-mle,cache=FALSE-------------------------------------------
+> ## ----radiation-mle,cache=FALSE------------------------------------------------
 > bake(file="radiation-mle.rds",{
 +   mle2(likfnRadiation,
 +     method="Nelder-Mead",
@@ -1291,7 +1298,7 @@ list()
 > 
 > 
 > 
-> ## ----radmat1,cache=FALSE,purl=TRUE---------------------------------------
+> ## ----radmat1,cache=FALSE,purl=TRUE--------------------------------------------
 > bake(file="radmat1.rds",{
 +   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
 +   for (i in seq_along(N)) {
@@ -1305,7 +1312,7 @@ list()
 + }) -> rr
 > 
 > 
-> ## ----radiation1-like-----------------------------------------------------
+> ## ----radiation1-like----------------------------------------------------------
 > likfnRadiation1 <- function (theta, psi) {
 +   theta <- exp(theta)
 +   iota <- theta*(rr%*%ylag)
@@ -1314,7 +1321,7 @@ list()
 + }
 > 
 > 
-> ## ----radiation1-mle,cache=FALSE------------------------------------------
+> ## ----radiation1-mle,cache=FALSE-----------------------------------------------
 > bake(file="radiation1-mle.rds",{
 +   mle2(likfnRadiation1,
 +     method="Nelder-Mead",
@@ -1326,11 +1333,11 @@ list()
 > 
 > 
 > 
-> ## ----xradmat1,cache=FALSE,purl=TRUE--------------------------------------
+> ## ----xradmat1,cache=FALSE,purl=TRUE-------------------------------------------
 > readRDS("radmat1.rds") -> rr
 > 
 > 
-> ## ----xrad1-like----------------------------------------------------------
+> ## ----xrad1-like---------------------------------------------------------------
 > likfnXRad1 <- function (theta, psi, phi) {
 +   theta <- exp(theta)
 +   phi <- exp(phi)
@@ -1340,7 +1347,7 @@ list()
 + }
 > 
 > 
-> ## ----xrad1-mle,cache=FALSE-----------------------------------------------
+> ## ----xrad1-mle,cache=FALSE----------------------------------------------------
 > bake(file="xrad1-mle.rds",{
 +   mle2(likfnXRad1,
 +     method="Nelder-Mead",
@@ -1376,11 +1383,19 @@ list()
 > 
 > 
 > 
-> ## ----session-info,cache=FALSE--------------------------------------------
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> ## ----session-info,cache=FALSE-------------------------------------------------
 > sessionInfo()
-R version 3.6.1 (2019-07-05)
+R version 4.0.0 (2020-04-24)
 Platform: x86_64-pc-linux-gnu (64-bit)
-Running under: Ubuntu 18.04.3 LTS
+Running under: Ubuntu 18.04.4 LTS
 
 Matrix products: default
 BLAS:   /usr/lib/x86_64-linux-gnu/openblas/libblas.so.3
@@ -1397,24 +1412,25 @@ attached base packages:
  [8] datasets  methods   base     
 
 other attached packages:
- [1] doMPI_0.2.2      Rmpi_0.6-9       doMC_1.3.6       ncf_1.2-8       
- [5] sp_1.3-1         scales_1.0.0     ggplot2_3.2.1    pomp_2.3.0.5    
- [9] nloptr_1.2.1     bbmle_1.0.20     iterators_1.0.12 foreach_1.4.7   
-[13] magrittr_1.5     reshape2_1.4.3   plyr_1.8.4      
+ [1] doMPI_0.2.2       Rmpi_0.6-9        doParallel_1.0.15 ncf_1.2-9        
+ [5] sp_1.4-2          scales_1.1.1      ggplot2_3.3.1     pomp_2.8.0.3     
+ [9] nloptr_1.2.2.1    bbmle_1.0.23.1    iterators_1.0.12  foreach_1.5.0    
+[13] magrittr_1.5      reshape2_1.4.4    plyr_1.8.6       
 
 loaded via a namespace (and not attached):
- [1] Rcpp_1.0.2          compiler_3.6.1      pillar_1.4.2       
- [4] tools_3.6.1         digest_0.6.21       tibble_2.1.3       
- [7] gtable_0.3.0        lattice_0.20-38     pkgconfig_2.0.3    
-[10] rlang_0.4.0         mvtnorm_1.0-11      coda_0.19-3        
-[13] withr_2.1.2         stringr_1.4.0       dplyr_0.8.3        
-[16] tidyselect_0.2.5    deSolve_1.24        glue_1.3.1         
-[19] R6_2.4.0            purrr_0.3.2         MASS_7.3-51.4      
-[22] codetools_0.2-16    assertthat_0.2.1    colorspace_1.4-1   
-[25] numDeriv_2016.8-1.1 stringi_1.4.3       lazyeval_0.2.2     
-[28] munsell_0.5.0       crayon_1.3.4       
+ [1] Rcpp_1.0.4.6        compiler_4.0.0      pillar_1.4.4       
+ [4] tools_4.0.0         digest_0.6.25       lifecycle_0.2.0    
+ [7] tibble_3.0.1        gtable_0.3.0        lattice_0.20-41    
+[10] pkgconfig_2.0.3     rlang_0.4.6         Matrix_1.2-18      
+[13] mvtnorm_1.1-0       coda_0.19-3         withr_2.2.0        
+[16] dplyr_1.0.0         stringr_1.4.0       generics_0.0.2     
+[19] vctrs_0.3.0         tidyselect_1.1.0    deSolve_1.28       
+[22] glue_1.4.1          R6_2.4.1            bdsmatrix_1.3-4    
+[25] purrr_0.3.4         codetools_0.2-16    ellipsis_0.3.1     
+[28] MASS_7.3-51.6       colorspace_1.4-1    numDeriv_2016.8-1.1
+[31] stringi_1.4.6       munsell_0.5.0       crayon_1.3.4       
 > 
 > 
 > proc.time()
     user   system  elapsed 
-14441.10 17256.58 62175.01 
+20873.44 15543.84 68169.40 

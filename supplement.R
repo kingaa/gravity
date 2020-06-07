@@ -1,7 +1,7 @@
 params <-
 list(prefix = "coupling")
 
-## ----prelims,cache=FALSE,purl=TRUE---------------------------------------
+## ----prelims,cache=FALSE,purl=TRUE--------------------------------------------
 options(
   keep.source=TRUE,
   stringsAsFactors=FALSE,
@@ -29,7 +29,7 @@ library(ncf)
 theme_set(theme_bw())
 
 
-## ----clean-data,purl=TRUE------------------------------------------------
+## ----clean-data,purl=TRUE-----------------------------------------------------
 stew(file="clean_data.rda",{
   library(aakmisc)
   
@@ -54,7 +54,7 @@ stew(file="clean_data.rda",{
 
 
 
-## ----coords,purl=TRUE----------------------------------------------------
+## ----coords,purl=TRUE---------------------------------------------------------
 bake(file="coords.rds",{
   library(aakmisc)
   startTunnel()
@@ -64,7 +64,7 @@ bake(file="coords.rds",{
 }) -> coords
 
 
-## ----distances,purl=TRUE-------------------------------------------------
+## ----distances,purl=TRUE------------------------------------------------------
 bake(file="distances.rds",{
   library(aakmisc)
   library(geosphere)
@@ -77,12 +77,12 @@ bake(file="distances.rds",{
 }) -> distances
 
 
-## ----startDoMC,cache=FALSE,include=FALSE,purl=TRUE-----------------------
-  library(doMC)
-  registerDoMC()
+## ----startDoParallel,cache=FALSE,include=FALSE,purl=TRUE----------------------
+  library(doParallel)
+  registerDoParallel()
 
 
-## ----under-reporting,purl=TRUE-------------------------------------------
+## ----under-reporting,purl=TRUE------------------------------------------------
 bake(file="under-reporting.rds",{
   foreach (d=dlply(dat,~town),
            .combine=rbind,.inorder=FALSE,
@@ -98,7 +98,7 @@ bake(file="under-reporting.rds",{
 }) -> dat
 
 
-## ----susceptible-reconstruction,purl=TRUE--------------------------------
+## ----susceptible-reconstruction,purl=TRUE-------------------------------------
 bake(file="susc-reconst.rds",{
   foreach (d=dlply(dat,~town),
            .combine=rbind,.inorder=FALSE,
@@ -111,7 +111,7 @@ bake(file="susc-reconst.rds",{
 }) -> dat
 
 
-## ----make-data-matrix,purl=TRUE------------------------------------------
+## ----make-data-matrix,purl=TRUE-----------------------------------------------
 bake(file="data-matrix.rds",{
   dat %>%
     ddply(~town,mutate,
@@ -123,7 +123,7 @@ bake(file="data-matrix.rds",{
 }) -> dat
 
 
-## ----exclude-weird-towns,purl=TRUE---------------------------------------
+## ----exclude-weird-towns,purl=TRUE--------------------------------------------
 bake(file="exclusions.rds",{
   dat %>%
     ddply(~town,summarize,
@@ -135,7 +135,7 @@ bake(file="exclusions.rds",{
 print(length(excludes))
 
 
-## ----sigma-profile,purl=TRUE---------------------------------------------
+## ----sigma-profile,purl=TRUE--------------------------------------------------
 sigma1dev <- function (dat, sigma) {
   slag <- with(dat,sigma*Ps+zlag)
   fit <- glm(log(I)~-1+seas+log(Ilag)+I(1/Ilag)+offset(log(slag)),
@@ -158,7 +158,7 @@ bake(file="sigma-profile.rds",{
 }) -> sigmaProf
 
 
-## ----sigma-bar,purl=TRUE-------------------------------------------------
+## ----sigma-bar,purl=TRUE------------------------------------------------------
 bake(file="sigma-bar.rds",{
   dat %>% subset(!(town%in%excludes)) -> dat1
   fit <- optim(par=0.037,lower=0.03,upper=0.10,
@@ -176,7 +176,7 @@ dat %>% mutate(Slag=sigmaBar*Ps+zlag) -> dat
 
 
 
-## ----fit-tsir,purl=TRUE--------------------------------------------------
+## ----fit-tsir,purl=TRUE-------------------------------------------------------
 bake(file="tsir-fits.rds",{
   coefnames <- c(sprintf("seas%d",1:26),"log(Ilag)","I(1/Ilag)")
   newcoefnames <- c(sprintf("log.beta%02d",1:26),"alpha","m.alpha")
@@ -221,7 +221,7 @@ bake(file="tsir-fits.rds",{
 
 
 
-## ----gravity-pre,purl=TRUE-----------------------------------------------
+## ----gravity-pre,purl=TRUE----------------------------------------------------
 readRDS("tsir-fits.rds") -> dat
 dat %>% acast(town~year+biweek,value.var="ylag") -> ylag
 dat %>% acast(town~year+biweek,value.var="Slag") -> slag
@@ -251,19 +251,19 @@ obs <- obs[relevant]
 betaS <- beta[relevant]*slag[relevant]
 
 
-## ----startMPI,cache=FALSE,include=FALSE,purl=TRUE------------------------
+## ----startMPI,cache=FALSE,include=FALSE,purl=TRUE-----------------------------
 if (file.exists("CLUSTER")) {
   scan("CLUSTER",what=integer(0)) -> ncpu
   library(doMPI)
   cl <- startMPIcluster(ncpu,verbose=TRUE,logdir="/tmp")
   registerDoMPI(cl)
 } else {
-  library(doMC)
-  registerDoMC()
+  library(doParallel)
+  registerDoParallel()
 }
 
 
-## ----gravity-like,purl=TRUE----------------------------------------------
+## ----gravity-like,purl=TRUE---------------------------------------------------
 likfnGravity <- function (theta, phi, rho, psi, tau1, tau2) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -275,7 +275,7 @@ likfnGravity <- function (theta, phi, rho, psi, tau1, tau2) {
 }
 
 
-## ----gravity-profile-2D,cache=FALSE,purl=TRUE----------------------------
+## ----gravity-profile-2D,cache=FALSE,purl=TRUE---------------------------------
 bake(file="gravity.rds",{
   
   grd <- profileDesign(
@@ -354,7 +354,7 @@ bake(file="gravity.rds",{
 }) -> results
 
 
-## ----gravity-mle,cache=FALSE---------------------------------------------
+## ----gravity-mle,cache=FALSE--------------------------------------------------
 bake("gravity-mle.rds",{
   
   results %>%
@@ -379,7 +379,7 @@ bake("gravity-mle.rds",{
 
 
 
-## ----xia-like,purl=TRUE--------------------------------------------------
+## ----xia-like,purl=TRUE-------------------------------------------------------
 likfnXia <- function (theta, phi, rho, psi, tau1, tau2) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -391,7 +391,7 @@ likfnXia <- function (theta, phi, rho, psi, tau1, tau2) {
 }
 
 
-## ----xia-profile-2D,cache=FALSE,purl=TRUE--------------------------------
+## ----xia-profile-2D,cache=FALSE,purl=TRUE-------------------------------------
 bake(file="xia.rds",{
   
   grd <- expand.grid(
@@ -426,7 +426,7 @@ bake(file="xia.rds",{
 }) -> results
 
 
-## ----xia-mle,cache=FALSE-------------------------------------------------
+## ----xia-mle,cache=FALSE------------------------------------------------------
 bake("xia-mle.rds",{
   results %>%
     extract(!sapply(results,inherits,"try-error")) %>%
@@ -450,7 +450,7 @@ bake("xia-mle.rds",{
 
 
 
-## ----meanfield-like,purl=TRUE--------------------------------------------
+## ----meanfield-like,purl=TRUE-------------------------------------------------
 likfnMeanField <- function (theta, phi, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -461,7 +461,7 @@ likfnMeanField <- function (theta, phi, psi) {
 }
 
 
-## ----meanfield-optim,cache=FALSE,purl=TRUE-------------------------------
+## ----meanfield-optim,cache=FALSE,purl=TRUE------------------------------------
 bake(file="meanfield.rds",{
 
   grd <- sobolDesign(
@@ -540,7 +540,7 @@ bake(file="meanfield.rds",{
 
 
 
-## ----meanfield-mle,cache=FALSE-------------------------------------------
+## ----meanfield-mle,cache=FALSE------------------------------------------------
 bake("meanfield-mle.rds",{
   
   results %>%
@@ -563,7 +563,7 @@ bake("meanfield-mle.rds",{
 
 
 
-## ----diffusion-like,purl=TRUE--------------------------------------------
+## ----diffusion-like,purl=TRUE-------------------------------------------------
 likfnDiffusion <- function (theta, phi, rho, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -575,7 +575,7 @@ likfnDiffusion <- function (theta, phi, rho, psi) {
 }
 
 
-## ----diffusion-profile-2D,cache=FALSE,purl=TRUE--------------------------
+## ----diffusion-profile-2D,cache=FALSE,purl=TRUE-------------------------------
 bake(file="diffusion.rds",{
 
   grd <- profileDesign(
@@ -653,7 +653,7 @@ bake(file="diffusion.rds",{
 }) -> results
 
 
-## ----diffusion-mle,cache=FALSE-------------------------------------------
+## ----diffusion-mle,cache=FALSE------------------------------------------------
 bake("diffusion-mle.rds",{
   
   results %>%
@@ -678,7 +678,7 @@ bake("diffusion-mle.rds",{
 
 
 
-## ----compdest-like,purl=TRUE---------------------------------------------
+## ----compdest-like,purl=TRUE--------------------------------------------------
 iii <- 1-diag(length(N))
 
 likfnCompDest <- function (theta, phi, rho, psi, tau1, tau2, delta) {
@@ -693,7 +693,7 @@ likfnCompDest <- function (theta, phi, rho, psi, tau1, tau2, delta) {
 }
 
 
-## ----compdest-profile-2D,cache=FALSE,purl=TRUE---------------------------
+## ----compdest-profile-2D,cache=FALSE,purl=TRUE--------------------------------
 bake(file="compdest.rds",{
   
   grd <- profileDesign(
@@ -772,7 +772,7 @@ bake(file="compdest.rds",{
 }) -> results
 
 
-## ----compdest-mle,cache=FALSE--------------------------------------------
+## ----compdest-mle,cache=FALSE-------------------------------------------------
 bake("compdest-mle.rds",{
   
   results %>%
@@ -793,7 +793,7 @@ bake("compdest-mle.rds",{
 }) -> mle.compdest
 
 
-## ----compdest-results,purl=TRUE------------------------------------------
+## ----compdest-results,purl=TRUE-----------------------------------------------
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -811,7 +811,7 @@ results %>% count(~conv)
 
 
 
-## ----compdest-profile-delta,cache=FALSE,purl=TRUE------------------------
+## ----compdest-profile-delta,cache=FALSE,purl=TRUE-----------------------------
 bake(file="compdest_delta.rds",{
   
   grd <- profileDesign(
@@ -891,7 +891,7 @@ bake(file="compdest_delta.rds",{
 
 
 
-## ----compdest-profile-tau1,cache=FALSE,purl=TRUE-------------------------
+## ----compdest-profile-tau1,cache=FALSE,purl=TRUE------------------------------
 bake(file="compdest_tau1.rds",{
   
   grd <- profileDesign(
@@ -971,7 +971,7 @@ bake(file="compdest_tau1.rds",{
 
 
 
-## ----compdest-profile-tau2,cache=FALSE,purl=TRUE-------------------------
+## ----compdest-profile-tau2,cache=FALSE,purl=TRUE------------------------------
 bake(file="compdest_tau2.rds",{
   
   grd <- profileDesign(
@@ -1051,7 +1051,7 @@ bake(file="compdest_tau2.rds",{
 
 
 
-## ----rankmat,cache=FALSE,purl=TRUE---------------------------------------
+## ----rankmat,cache=FALSE,purl=TRUE--------------------------------------------
 bake(file="rankmat.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
@@ -1064,7 +1064,7 @@ bake(file="rankmat.rds",{
 }) -> rr
 
 
-## ----stouffer-like,purl=TRUE---------------------------------------------
+## ----stouffer-like,purl=TRUE--------------------------------------------------
 likfnStouffer <- function (theta, phi, tau1, tau2, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -1074,7 +1074,7 @@ likfnStouffer <- function (theta, phi, tau1, tau2, psi) {
 }
 
 
-## ----stouffer-profile-2D,cache=FALSE,purl=TRUE---------------------------
+## ----stouffer-profile-2D,cache=FALSE,purl=TRUE--------------------------------
 bake(file="stouffer.rds",{
   
   grd <- expand.grid(
@@ -1107,7 +1107,7 @@ bake(file="stouffer.rds",{
 }) -> results
 
 
-## ----stouffer-mle,cache=FALSE--------------------------------------------
+## ----stouffer-mle,cache=FALSE-------------------------------------------------
 bake("stouffer-mle.rds",{
   
   results %>%
@@ -1132,7 +1132,7 @@ bake("stouffer-mle.rds",{
 
 
 
-## ----rankmat1,cache=FALSE,purl=TRUE--------------------------------------
+## ----rankmat1,cache=FALSE,purl=TRUE-------------------------------------------
 bake(file="rankmat1.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
@@ -1145,7 +1145,7 @@ bake(file="rankmat1.rds",{
 }) -> rr
 
 
-## ----stouffer1-like,purl=TRUE--------------------------------------------
+## ----stouffer1-like,purl=TRUE-------------------------------------------------
 likfnStouffer1 <- function (theta, phi, tau1, tau2, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -1155,7 +1155,7 @@ likfnStouffer1 <- function (theta, phi, tau1, tau2, psi) {
 }
 
 
-## ----stouffer1-profile-2D,cache=FALSE,purl=TRUE--------------------------
+## ----stouffer1-profile-2D,cache=FALSE,purl=TRUE-------------------------------
 bake(file="stouffer1.rds",{
   
   grd <- expand.grid(
@@ -1188,7 +1188,7 @@ bake(file="stouffer1.rds",{
 }) -> results
 
 
-## ----stouffer1-mle,cache=FALSE-------------------------------------------
+## ----stouffer1-mle,cache=FALSE------------------------------------------------
 bake("stouffer1-mle.rds",{
   
   results %>%
@@ -1213,7 +1213,7 @@ bake("stouffer1-mle.rds",{
 
 
 
-## ----radmat,cache=FALSE,purl=TRUE----------------------------------------
+## ----radmat,cache=FALSE,purl=TRUE---------------------------------------------
 bake(file="radmat.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
@@ -1227,7 +1227,7 @@ bake(file="radmat.rds",{
 }) -> rr
 
 
-## ----radiation-like------------------------------------------------------
+## ----radiation-like-----------------------------------------------------------
 likfnRadiation <- function (theta, psi) {
   theta <- exp(theta)
   iota <- theta*(rr%*%ylag)
@@ -1236,7 +1236,7 @@ likfnRadiation <- function (theta, psi) {
 }
 
 
-## ----radiation-mle,cache=FALSE-------------------------------------------
+## ----radiation-mle,cache=FALSE------------------------------------------------
 bake(file="radiation-mle.rds",{
   mle2(likfnRadiation,
     method="Nelder-Mead",
@@ -1248,7 +1248,7 @@ bake(file="radiation-mle.rds",{
 
 
 
-## ----radmat1,cache=FALSE,purl=TRUE---------------------------------------
+## ----radmat1,cache=FALSE,purl=TRUE--------------------------------------------
 bake(file="radmat1.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
@@ -1262,7 +1262,7 @@ bake(file="radmat1.rds",{
 }) -> rr
 
 
-## ----radiation1-like-----------------------------------------------------
+## ----radiation1-like----------------------------------------------------------
 likfnRadiation1 <- function (theta, psi) {
   theta <- exp(theta)
   iota <- theta*(rr%*%ylag)
@@ -1271,7 +1271,7 @@ likfnRadiation1 <- function (theta, psi) {
 }
 
 
-## ----radiation1-mle,cache=FALSE------------------------------------------
+## ----radiation1-mle,cache=FALSE-----------------------------------------------
 bake(file="radiation1-mle.rds",{
   mle2(likfnRadiation1,
     method="Nelder-Mead",
@@ -1283,11 +1283,11 @@ bake(file="radiation1-mle.rds",{
 
 
 
-## ----xradmat1,cache=FALSE,purl=TRUE--------------------------------------
+## ----xradmat1,cache=FALSE,purl=TRUE-------------------------------------------
 readRDS("radmat1.rds") -> rr
 
 
-## ----xrad1-like----------------------------------------------------------
+## ----xrad1-like---------------------------------------------------------------
 likfnXRad1 <- function (theta, psi, phi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -1297,7 +1297,7 @@ likfnXRad1 <- function (theta, psi, phi) {
 }
 
 
-## ----xrad1-mle,cache=FALSE-----------------------------------------------
+## ----xrad1-mle,cache=FALSE----------------------------------------------------
 bake(file="xrad1-mle.rds",{
   mle2(likfnXRad1,
     method="Nelder-Mead",
@@ -1333,6 +1333,14 @@ bake(file="xrad1-mle.rds",{
 
 
 
-## ----session-info,cache=FALSE--------------------------------------------
+
+
+
+
+
+
+
+
+## ----session-info,cache=FALSE-------------------------------------------------
 sessionInfo()
 
