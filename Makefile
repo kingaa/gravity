@@ -9,6 +9,7 @@ RCMD = $(REXE) CMD
 RSCRIPT = Rscript --vanilla
 
 default: supplement.html
+	$(CP) supplement.html www/index.html
 
 %.html: %.Rmd
 	PATH=/usr/lib/rstudio/bin/pandoc:$$PATH \
