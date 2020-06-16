@@ -1,7 +1,7 @@
 ---
 title: "Comparison of alternative models of human movement and the spread of disease"
-subtitle: "Technical Appendix"
-csl: ecology.csl
+subtitle: "Supporting Material"
+csl: plos.csl
 output:
   html_document:
     code_folding: hide
@@ -93,9 +93,11 @@ library(ncf)
 theme_set(theme_bw())
 ```
 
-## Preprocess the data.
+The data are measles case reports, population sizes, and weekly numbers of live births, from 954 population centers (cities, towns, villages) in England and Wales.
+The data are the same as those analyzed in @Lau2020.
+[The github repo for that paper](https://github.com/msylau/measles_competing_risks) is the definitive source.
 
-Retrieve the data from the database.
+## Data preprocessing.
 
 ```{r clean-data,purl=TRUE}
 stew(file="clean_data.rda",{
@@ -123,11 +125,11 @@ stew(file="clean_data.rda",{
 In the above:
 
 1. Measles data is weekly; dates given correspond to Sunday.
-1. Associate each week's data with the Weds. of that week.
-1. Discard any 53rd weeks (1947,1952,1958,1964).
-1. Aggregate by biweek (26 biweeks/yr).
-1. Join with demographic data.
-1. Scale birth rates to births/biweek.
+1. We associate each week's data with the Weds. of that week.
+1. We discard any 53rd weeks (1947,1952,1958,1964).
+1. We aggregate by biweek (26 biweeks/yr).
+1. We join the epidemiological and demographic data.
+1. We scale birth rates to births/biweek.
 
 ## Fadeouts
 

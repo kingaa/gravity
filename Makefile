@@ -8,9 +8,7 @@ REXE = R --vanilla
 RCMD = $(REXE) CMD
 RSCRIPT = Rscript --vanilla
 
-default: gravity2.pdf
-
-gravity2.pdf: supplement.html
+default: supplement.html
 
 %.html: %.Rmd
 	PATH=/usr/lib/rstudio/bin/pandoc:$$PATH \
