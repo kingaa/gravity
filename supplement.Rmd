@@ -30,6 +30,11 @@ bibliography: gravity.bib
 \newcommand\lik{\mathscr{L}}
 \newcommand\loglik{\ell}
 
+The [source code for this document is here](https://github.com/kingaa/gravity/).
+
+This material is provided under the Creative Commons Attribution-ShareAlike 4.0 International Public License.  
+![CC-BY_SA](cc-by-sa.png)
+
 Produced with **R** version `r getRversion()`.
 
 --------------------------
