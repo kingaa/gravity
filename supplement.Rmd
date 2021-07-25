@@ -234,9 +234,9 @@ Regress cumulative cases on cumulative births to estimate under-reporting (ur) a
 ```{r under-reporting,purl=TRUE}
 bake(file="under-reporting.rds",{
   foreach (d=dlply(dat,~town),
-           .combine=rbind,.inorder=FALSE,
-           .packages=c("plyr")
-           ) %dopar% {
+    .combine=rbind,.inorder=FALSE,
+    .packages=c("plyr")
+  ) %dopar% {
     cumbirths <- cumsum(d$births)
     cumcases <- cumsum(d$cases)
     fit <- smooth.spline(cumbirths,cumcases,df=2.5)
@@ -252,13 +252,13 @@ Now reconstruct the susceptibles (via the residuals `z`).
 ```{r susceptible-reconstruction,purl=TRUE}
 bake(file="susc-reconst.rds",{
   foreach (d=dlply(dat,~town),
-           .combine=rbind,.inorder=FALSE,
-           .packages=c("plyr")) %dopar% {
-             cumbirths <- cumsum(d$births)
-             cuminc <- cumsum(d$I)
-             fit <- smooth.spline(cumbirths,cuminc,df=2.5)
-             mutate(d,z=-residuals(fit))
-           } -> dat
+    .combine=rbind,.inorder=FALSE,
+    .packages=c("plyr")) %dopar% {
+      cumbirths <- cumsum(d$births)
+      cuminc <- cumsum(d$I)
+      fit <- smooth.spline(cumbirths,cuminc,df=2.5)
+      mutate(d,z=-residuals(fit))
+    } -> dat
 }) -> dat
 ```
 
@@ -517,7 +517,7 @@ bake(file="gravity.rds",{
     .inorder=FALSE,
     .packages=c("nloptr","magrittr")
   ) %dopar% try(
-    {
+  {
       fixed <- c("tau1","tau2")
       formals(likfnGravity) %>% names() %>% setdiff(fixed) -> est
       nloptr(unlist(start[est]),
@@ -2227,93 +2227,103 @@ gb %>%
 ```
   
 ```{r ratemaps,message=FALSE,results="hide",purl=FALSE}
-impexp %>%
-  dplyr::select(town,model,export=erate,import=irate) %>%
-  dplyr::filter(model %in% c("XR","G","CD","SV")) %>%
-  tidyr::gather(variable,value,export,import) %>%
-  acast(model~town~variable,value.var="value") %>%
-  aaply(c(2,3),function(x)outer(x,x,FUN="-")) %>%
-  melt() %>%
-  dplyr::rename(town=X1,variable=X2,m1=Var3,m2=Var4) %>% 
-  mutate(
-    m1=ordered(m1,levels=c("XR","G","CD","SV")),
-    m2=ordered(m2,levels=c("XR","G","CD","SV"))
-  ) %>%
-  dplyr::filter(m1 > m2) %>% 
-  dplyr::left_join(coords,by="town") -> ied
-
-expand.grid(m2=1:4,m1=1:4) %>%
-  dplyr::filter(m1<m2) %>%
-  dplyr::mutate(
-           model1=c("SV","CD","G","XR")[m1],
-           model2=c("SV","CD","G","XR")[m2]
-         ) -> comps
-           
-foreach (c=iter(comps,"row")) %do% {
-  ied %>%
-    dplyr::filter(m1==c$model1 & m2==c$model2) %>%
-    arrange(variable,abs(value)) -> d
-  gb %>%
-    ggplot(aes(x=long,y=lat))+
-    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-    coord_map(projection="gilbert")+
-    lims(x=bbox["x",],y=bbox["y",])+
-    geom_point(
-      data=d,
-      aes(x=long,y=lat,color=value),
-      size=1
-    )+
-    guides(alpha=FALSE)+
-    scale_color_gradient2(mid="gray90")+
-    labs(title="differences in predicted per capita import and export rates",
-      subtitle=sprintf("%s - %s",c$model1,c$model2),
-      color="",x="",y="")+
-    facet_wrap(~variable,nrow=1)+
-    theme(axis.text=element_blank()) -> pl
-} -> ratemaps
+stew(
+  file="ratemaps.rda",
+  dependson=list(impexp),
+  {
+    impexp %>%
+      dplyr::select(town,model,export=erate,import=irate) %>%
+      dplyr::filter(model %in% c("XR","G","CD","SV")) %>%
+      tidyr::gather(variable,value,export,import) %>%
+      acast(model~town~variable,value.var="value") %>%
+      aaply(c(2,3),function(x)outer(x,x,FUN="-")) %>%
+      melt() %>%
+      dplyr::rename(town=X1,variable=X2,m1=Var3,m2=Var4) %>% 
+      mutate(
+        m1=ordered(m1,levels=c("XR","G","CD","SV")),
+        m2=ordered(m2,levels=c("XR","G","CD","SV"))
+      ) %>%
+      dplyr::filter(m1 > m2) %>% 
+      dplyr::left_join(coords,by="town") -> ied
+    
+    expand.grid(m2=1:4,m1=1:4) %>%
+      dplyr::filter(m1<m2) %>%
+      dplyr::mutate(
+               model1=c("SV","CD","G","XR")[m1],
+               model2=c("SV","CD","G","XR")[m2]
+             ) -> comps
+    
+    foreach (c=iter(comps,"row")) %do% {
+      ied %>%
+        dplyr::filter(m1==c$model1 & m2==c$model2) %>%
+        arrange(variable,abs(value)) -> d
+      gb %>%
+        ggplot(aes(x=long,y=lat))+
+        geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+        coord_map(projection="gilbert")+
+        lims(x=bbox["x",],y=bbox["y",])+
+        geom_point(
+          data=d,
+          aes(x=long,y=lat,color=value),
+          size=1
+        )+
+        guides(alpha="none")+
+        scale_color_gradient2(mid="gray90")+
+        labs(title="differences in predicted per capita import and export rates",
+          subtitle=sprintf("%s - %s",c$model1,c$model2),
+          color="",x="",y="")+
+        facet_wrap(~variable,nrow=1)+
+        theme(axis.text=element_blank()) -> pl
+    } -> ratemaps
+  }) -> ratemaps
 
 print(ratemaps)
 ```
 
 ```{r sv_g_imp_exp,include=FALSE,purl=FALSE}
-ied %>%
-  dplyr::filter(m1=="SV" & m2=="G") %>%
-  arrange(variable,abs(value)) -> d
-
-d %>%
-  summarize(min=min(value),max=max(value)) -> dr
-
-gb %>%
-  ggplot(aes(x=long,y=lat))+
-  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-  coord_map(projection="gilbert")+
-  lims(x=bbox["x",],y=bbox["y",])+
-  geom_point(
-    data=dplyr::filter(d,variable=="import"),
-    aes(x=long,y=lat,color=value),
-    size=1
-  )+
-  guides(alpha=FALSE)+
-#  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
-  scale_color_gradient2(mid="gray90")+
-  labs(color="import rate",x="",y="")+
-  theme(axis.text=element_blank()) -> sv_g_imp
-
-gb %>%
-  ggplot(aes(x=long,y=lat))+
-  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-  coord_map(projection="gilbert")+
-  lims(x=bbox["x",],y=bbox["y",])+
-  geom_point(
-    data=dplyr::filter(d,variable=="export"),
-    aes(x=long,y=lat,color=value),
-    size=1
-  )+
-  guides(alpha=FALSE)+
-#  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
-  scale_color_gradient2(mid="gray90")+
-  labs(color="export rate",x="",y="")+
-  theme(axis.text=element_blank()) -> sv_g_exp
+stew(
+  file="sv_g_imp_exp.rda",
+  dependson=list(ied),
+  {
+    ied %>%
+      dplyr::filter(m1=="SV" & m2=="G") %>%
+      arrange(variable,abs(value)) -> d
+    
+    d %>%
+      summarize(min=min(value),max=max(value)) -> dr
+    
+    gb %>%
+      ggplot(aes(x=long,y=lat))+
+      geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+      coord_map(projection="gilbert")+
+      lims(x=bbox["x",],y=bbox["y",])+
+      geom_point(
+        data=dplyr::filter(d,variable=="import"),
+        aes(x=long,y=lat,color=value),
+        size=1
+      )+
+      guides(alpha="none")+
+      ##  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
+      scale_color_gradient2(mid="gray90")+
+      labs(color="import rate",x="",y="")+
+      theme(axis.text=element_blank()) -> sv_g_imp
+    
+    gb %>%
+      ggplot(aes(x=long,y=lat))+
+      geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+      coord_map(projection="gilbert")+
+      lims(x=bbox["x",],y=bbox["y",])+
+      geom_point(
+        data=dplyr::filter(d,variable=="export"),
+        aes(x=long,y=lat,color=value),
+        size=1
+      )+
+      guides(alpha="none")+
+      ##  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
+      scale_color_gradient2(mid="gray90")+
+      labs(color="export rate",x="",y="")+
+      theme(axis.text=element_blank()) -> sv_g_exp
+  })
 ```
 
 ## Fadeout residuals
@@ -2333,7 +2343,7 @@ gb %>%
     aes(x=long,y=lat,color=residual),
     size=1
   )+
-#  guides(alpha=FALSE)+
+  ##  guides(alpha="none")+
   scale_color_gradient2(mid="gray90")+
   labs(color="",x="",y="")+
   coord_map(projection="gilbert")+
@@ -2410,209 +2420,236 @@ likXRad1 <- function (mle) {
 
 poplim <- 1e5
 
-data.frame(
-  SV=likStouffer1(mle.stouffer1),
-  CD=likCompDest(mle.compdest),
-  G=likGravity(mle.grav),
-  XR=likXRad1(mle.xrad1),
-  N=N
-) %>%
-  name_rows() %>%
-  dplyr::rename(town=.rownames) %>%
-  dplyr::left_join(coords,by="town") %>%
-  dplyr::filter(N<poplim) %>%
-  tidyr::gather(model,value,-N,-town,-long,-lat) -> spatialLiks
+stew(
+  file="comps.rda",
+  dependson=list(
+    mle.stouffer1,mle.compdest,mle.grav,mle.xrad1,
+    N,poplim),
+  {
+    data.frame(
+      SV=likStouffer1(mle.stouffer1),
+      CD=likCompDest(mle.compdest),
+      G=likGravity(mle.grav),
+      XR=likXRad1(mle.xrad1),
+      N=N
+    ) %>%
+      name_rows() %>%
+      dplyr::rename(town=.rownames) %>%
+      dplyr::left_join(coords,by="town") %>%
+      dplyr::filter(N<poplim) %>%
+      tidyr::gather(model,value,-N,-town,-long,-lat) -> spatialLiks
 
-expand.grid(m2=1:4,m1=1:4) %>%
-  dplyr::filter(m1<m2) %>%
-  dplyr::mutate(
-           model1=c("SV","CD","G","XR")[m1],
-           model2=c("SV","CD","G","XR")[m2]
-         ) -> comps
-
+    expand.grid(m2=1:4,m1=1:4) %>%
+      dplyr::filter(m1<m2) %>%
+      dplyr::mutate(
+               model1=c("SV","CD","G","XR")[m1],
+               model2=c("SV","CD","G","XR")[m2]
+             ) -> comps
+  })
 ```
 
 ```{r loglik_by_size,purl=FALSE,results="hide"}
-foreach (c=iter(comps,"row")) %do% {
-  
-  spatialLiks %>% 
-    dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
-    dplyr::mutate(
-      model=factor(model,levels=c("SV","XR","CD","G"))
-    ) %>%
-    dplyr::filter(model==c$model1) %>%
-    dplyr::select(model,town,N,value) -> d1
-  spatialLiks %>% 
-    dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
-    dplyr::mutate(
-      model=factor(model,levels=c("SV","XR","CD","G"))
-    ) %>%
-    dplyr::filter(model==c$model2) %>%
-    dplyr::select(model,town,N,value) -> d2
-  dplyr::full_join(d1,d2,by=c("town","N"),
-                   suffix=c("_1","_2")) %>%
-    mutate(diff=value_1-value_2) -> dd
-  
- dd %>%
-   ggplot(aes(x=N,y=diff,color=diff>0,group=1))+
-   geom_point()+
-   scale_x_log10()+
-   guides(color=FALSE)+
-   geom_smooth(method="loess")+
-   scale_color_manual(values=c(`TRUE`=muted("blue"),`FALSE`=muted("red")))+
-   labs(title="mean per datum differences in log likelihood",
-        subtitle=sprintf("%s - %s",c$model1,c$model2),
-        x="",y="",color="") -> pl
- 
-} -> likpl
+bake(
+  file="loglik_by_size.rds",
+  dependson=list(comps,spatialLiks),
+  {
+    foreach (c=iter(comps,"row")) %do% {
+      
+      spatialLiks %>% 
+        dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
+        dplyr::mutate(
+                 model=factor(model,levels=c("SV","XR","CD","G"))
+               ) %>%
+        dplyr::filter(model==c$model1) %>%
+        dplyr::select(model,town,N,value) -> d1
+      spatialLiks %>% 
+        dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
+        dplyr::mutate(
+                 model=factor(model,levels=c("SV","XR","CD","G"))
+               ) %>%
+        dplyr::filter(model==c$model2) %>%
+        dplyr::select(model,town,N,value) -> d2
+      dplyr::full_join(d1,d2,by=c("town","N"),
+        suffix=c("_1","_2")) %>%
+        mutate(diff=value_1-value_2) -> dd
+      
+      dd %>%
+        ggplot(aes(x=N,y=diff,color=diff>0,group=1))+
+        geom_point()+
+        scale_x_log10()+
+        guides(color="none")+
+        geom_smooth(method="loess")+
+        scale_color_manual(values=c(`TRUE`=muted("blue"),`FALSE`=muted("red")))+
+        labs(title="mean per datum differences in log likelihood",
+          subtitle=sprintf("%s - %s",c$model1,c$model2),
+          x="",y="",color="") -> pl
+    } -> likpl
+  }) -> likpl
 
 print(likpl)
-
 ```
 
 ```{r likmaps,results="hide",purl=FALSE}
-foreach (c=iter(comps,"row")) %do% {
-  
-  spatialLiks %>% dplyr::filter(model==c$model1) -> d1
-  spatialLiks %>% dplyr::filter(model==c$model2) -> d2
-  dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-    suffix=c("_1","_2")) %>%
-    mutate(diff=value_1-value_2) -> dd
-  
- gb %>%
-    ggplot(aes(x=long,y=lat))+
-    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-    coord_map(projection="gilbert")+
-    lims(x=bbox["x",],y=bbox["y",])+
-    geom_point(
-      data=dd,
-        aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
-      size=1
-    )+
-   guides(alpha=FALSE)+
-   scale_color_gradient2(mid="gray90")+
-   labs(title="per datum differences in log likelihood",
-     subtitle=sprintf("%s - %s",c$model1,c$model2),
-     x="",y="",color="")+
-   theme(axis.text=element_blank()) -> pl
- 
-} -> likmaps
+bake(
+  file="likmaps.rds",
+  dependson=list(comps,spatialLiks),
+  {
+    foreach (c=iter(comps,"row")) %do% {
+      
+      spatialLiks %>% dplyr::filter(model==c$model1) -> d1
+      spatialLiks %>% dplyr::filter(model==c$model2) -> d2
+      dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+        suffix=c("_1","_2")) %>%
+        mutate(diff=value_1-value_2) -> dd
+      
+      gb %>%
+        ggplot(aes(x=long,y=lat))+
+        geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+        coord_map(projection="gilbert")+
+        lims(x=bbox["x",],y=bbox["y",])+
+        geom_point(
+          data=dd,
+          aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
+          size=1
+        )+
+        guides(alpha="none")+
+        scale_color_gradient2(mid="gray90")+
+        labs(title="per datum differences in log likelihood",
+          subtitle=sprintf("%s - %s",c$model1,c$model2),
+          x="",y="",color="")+
+        theme(axis.text=element_blank()) -> pl
+      
+    } -> likmaps
+  }) -> likmaps
 
 print(likmaps)
-
 ```
 
 ```{r loglik_lisa,results="hide",purl=FALSE}
-foreach (c=iter(comps[c(2,4),],"row")) %do% {
-  
-  spatialLiks %>% dplyr::filter(model==c$model1) -> d1
-  spatialLiks %>% dplyr::filter(model==c$model2) -> d2
-  dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-    suffix=c("_1","_2")) %>%
-    mutate(diff=value_1-value_2) -> dd
-  
-  with(dd,
-    ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
-  ) -> ddlisa
-  
-  dd %>%
-    dplyr::mutate(
-      corr=ddlisa$correlation,
-      mean=ddlisa$mean,
-      p=ddlisa$p
-    ) %>%
-    dplyr::filter(p<0.05) -> dd
+bake(
+  file="loglik_lisa.rds",
+  dependson=list(comps,spatialLiks),
+  {
+    foreach (c=iter(comps[c(2,4),],"row")) %do% {
+      
+      spatialLiks %>% dplyr::filter(model==c$model1) -> d1
+      spatialLiks %>% dplyr::filter(model==c$model2) -> d2
+      dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+        suffix=c("_1","_2")) %>%
+        mutate(diff=value_1-value_2) -> dd
+      
+      with(dd,
+        ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+      ) -> ddlisa
+      
+      dd %>%
+        dplyr::mutate(
+                 corr=ddlisa$correlation,
+                 mean=ddlisa$mean,
+                 p=ddlisa$p
+               ) %>%
+        dplyr::filter(p<0.05) -> dd
 
- gb %>%
-    ggplot(aes(x=long,y=lat))+
-    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-    coord_map(projection="gilbert")+
-    lims(x=bbox["x",],y=bbox["y",])+
-    geom_point(
-      data=dd,
-      aes(x=long,y=lat,color=diff,alpha=0.5),
-      size=1
-    )+
-   guides(alpha=FALSE)+
-   scale_color_gradient2(mid="gray90")+
-   labs(title="significant per datum differences in log likelihood",
-     subtitle=sprintf("%s - %s",c$model1,c$model2),
-     x="",y="",color="")+
-   theme(axis.text=element_blank()) -> pl
- 
-} -> lisamaps
+      gb %>%
+        ggplot(aes(x=long,y=lat))+
+        geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+        coord_map(projection="gilbert")+
+        lims(x=bbox["x",],y=bbox["y",])+
+        geom_point(
+          data=dd,
+          aes(x=long,y=lat,color=diff,alpha=0.5),
+          size=1
+        )+
+        guides(alpha="none")+
+        scale_color_gradient2(mid="gray90")+
+        labs(title="significant per datum differences in log likelihood",
+          subtitle=sprintf("%s - %s",c$model1,c$model2),
+          x="",y="",color="")+
+        theme(axis.text=element_blank()) -> pl
+    }
+  }) -> lisamaps
 
 print(lisamaps)
 ```
 
 ```{r sv_g_lisa,include=FALSE,purl=FALSE}
-spatialLiks %>% dplyr::filter(model=="SV") -> d1
-spatialLiks %>% dplyr::filter(model=="G") -> d2
-dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-                 suffix=c("_1","_2")) %>%
-  mutate(diff=value_1-value_2) -> dd
-
-with(dd,
-     ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
-     ) -> ddlisa
-
-dd %>%
-  dplyr::mutate(
-           corr=ddlisa$correlation,
-           mean=ddlisa$mean,
-           p=ddlisa$p
-         ) %>%
-  dplyr::filter(p<0.05) -> dd
-
-gb %>%
-  ggplot(aes(x=long,y=lat))+
-  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-  coord_map(projection="gilbert")+
-  lims(x=bbox["x",],y=bbox["y",])+
-  geom_point(
-    data=dd,
-    aes(x=long,y=lat,color=diff,alpha=0.5),
-    size=1
-  )+
-  guides(alpha=FALSE)+
-  scale_color_gradient2(mid="gray90")+
-  labs(x="",y="",color="")+
-  theme(axis.text=element_blank()) -> sv_g_lisa
+bake(
+  file="sv_g_lisa.rds",
+  dependson=list(comps,spatialLiks),
+  {
+    spatialLiks %>% dplyr::filter(model=="SV") -> d1
+    spatialLiks %>% dplyr::filter(model=="G") -> d2
+    dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+      suffix=c("_1","_2")) %>%
+      mutate(diff=value_1-value_2) -> dd
+    
+    with(dd,
+      ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+    ) -> ddlisa
+    
+    dd %>%
+      dplyr::mutate(
+               corr=ddlisa$correlation,
+               mean=ddlisa$mean,
+               p=ddlisa$p
+             ) %>%
+      dplyr::filter(p<0.05) -> dd
+    
+    gb %>%
+      ggplot(aes(x=long,y=lat))+
+      geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+      coord_map(projection="gilbert")+
+      lims(x=bbox["x",],y=bbox["y",])+
+      geom_point(
+        data=dd,
+        aes(x=long,y=lat,color=diff,alpha=0.5),
+        size=1
+      )+
+      guides(alpha="none")+
+      scale_color_gradient2(mid="gray90")+
+      labs(x="",y="",color="")+
+      theme(axis.text=element_blank()) -> sv_g_lisa
+  }) -> sv_g_lisa
 ```
 
 ```{r cd_g_lisa,include=FALSE,purl=FALSE}
-spatialLiks %>% dplyr::filter(model=="CD") -> d1
-spatialLiks %>% dplyr::filter(model=="G") -> d2
-dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-                 suffix=c("_1","_2")) %>%
-  mutate(diff=value_1-value_2) -> dd
+bake(
+  file="cd_g_lisa.rds",
+  dependson=list(comps,spatialLiks),
+  {
+    spatialLiks %>% dplyr::filter(model=="CD") -> d1
+    spatialLiks %>% dplyr::filter(model=="G") -> d2
+    dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+      suffix=c("_1","_2")) %>%
+      mutate(diff=value_1-value_2) -> dd
+    
+    with(dd,
+      ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+    ) -> ddlisa
+    
+    dd %>%
+      dplyr::mutate(
+               corr=ddlisa$correlation,
+               mean=ddlisa$mean,
+               p=ddlisa$p
+             ) %>%
+      dplyr::filter(p<0.05) -> dd
 
-with(dd,
-     ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
-     ) -> ddlisa
-
-dd %>%
-  dplyr::mutate(
-           corr=ddlisa$correlation,
-           mean=ddlisa$mean,
-           p=ddlisa$p
-         ) %>%
-  dplyr::filter(p<0.05) -> dd
-
-gb %>%
-  ggplot(aes(x=long,y=lat))+
-  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-  coord_map(projection="gilbert")+
-  lims(x=bbox["x",],y=bbox["y",])+
-  geom_point(
-    data=dd,
-    aes(x=long,y=lat,color=diff,alpha=0.5),
-    size=1
-  )+
-  guides(alpha=FALSE)+
-  scale_color_gradient2(mid="gray90")+
-  labs(x="",y="",color="")+
-  theme(axis.text=element_blank()) -> cd_g_lisa
+    gb %>%
+      ggplot(aes(x=long,y=lat))+
+      geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+      coord_map(projection="gilbert")+
+      lims(x=bbox["x",],y=bbox["y",])+
+      geom_point(
+        data=dd,
+        aes(x=long,y=lat,color=diff,alpha=0.5),
+        size=1
+      )+
+      guides(alpha="none")+
+      scale_color_gradient2(mid="gray90")+
+      labs(x="",y="",color="")+
+      theme(axis.text=element_blank())
+  }) -> cd_g_lisa
 ```
 
 ```{r fig3,include=FALSE,purl=FALSE,fig.height=10,fig.width=10}
