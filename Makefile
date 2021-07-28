@@ -49,4 +49,4 @@ clean:
 
 fresh: clean
 	$(RM) *.ps *.bbl *.ind *.dvi
-	$(RM) -r cache figure
+	$(RM) -r tmp

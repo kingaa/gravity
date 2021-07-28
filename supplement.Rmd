@@ -17,71 +17,54 @@ output:
   pdf_document:
     toc: yes
     toc_depth: '2'
-params:
-  prefix: coupling
 bibliography: gravity.bib
 ---
-
-\newcommand\prob[1]{\mathbb{P}\left[{#1}\right]}
+    
 \newcommand\expect[1]{\mathbb{E}\left[{#1}\right]}
 \newcommand\var[1]{\mathrm{Var}\left[{#1}\right]}
 \newcommand\dist[2]{\mathrm{#1}\left(#2\right)}
-\newcommand\dlta[1]{{\Delta}{#1}}
-\newcommand\lik{\mathscr{L}}
-\newcommand\loglik{\ell}
 
 The [source code for this document is here](https://github.com/kingaa/gravity/).
 
 This material is provided under the Creative Commons Attribution-ShareAlike 4.0 International Public License.  
 ![CC-BY_SA](cc-by-sa.png)
-
+	
 Produced with **R** version `r getRversion()`.
-
+    
 --------------------------
-
+    
 ```{r knitr-opts,include=FALSE,cache=FALSE,purl=FALSE}
 library(knitr)
 opts_chunk$set(
-  eval=TRUE,
-  purl=FALSE,
-  progress=TRUE,
-  prompt=FALSE,tidy=FALSE,highlight=TRUE,
-  strip.white=TRUE,
-  warning=FALSE,
-  message=FALSE,
-  error=FALSE,
-  echo=TRUE,
-  cache=TRUE,
-  cache.extra=rand_seed,
-  results='markup',
-  fig.show='asis',
-  size='small',
-  fig.lp="fig:",
-  fig.path=paste0("figure/",params$prefix,"-"),
-  cache.path=paste0("cache/",params$prefix,"-"),
-  fig.pos="h!",
-  fig.align='center',
-  fig.height=4,fig.width=6.83,
-  dpi=300,
-  dev='png',
-  dev.args=list(bg='transparent')
-)
+             eval=TRUE,
+             purl=FALSE,
+             progress=TRUE,
+             prompt=FALSE,tidy=FALSE,highlight=TRUE,
+             strip.white=TRUE,
+             warning=FALSE,
+             message=FALSE,
+             error=FALSE,
+             echo=TRUE,
+             cache=FALSE,
+             cache.extra=rand_seed,
+             results='markup',
+             fig.show='asis',
+             size='small',
+             fig.lp="fig:",
+             fig.path=paste0("tmp/figure/"),
+             cache.path=paste0("tmp/cache/"),
+             fig.pos="h!",
+             fig.align='center',
+             fig.height=4,fig.width=6.83,
+             dpi=300,
+             dev='png',
+             dev.args=list(bg='transparent')
+           )
 ```
-
+ 
 # Preparations
-
+    
 ```{r prelims,cache=FALSE,purl=TRUE}
-options(
-  keep.source=TRUE,
-  stringsAsFactors=FALSE,
-  knitr.kable.NA="",
-  encoding="UTF-8",
-  aakmisc.dbname="ewmeasles",
-  aakmisc.remotehost="kinglab.eeb.lsa.umich.edu",
-  aakmisc.user="gravity")
-
-set.seed(594709947L)
-
 library(grid)
 library(plyr)
 library(reshape2)
@@ -91,13 +74,27 @@ library(iterators)
 library(bbmle)
 library(nloptr)
 library(pomp)
+stopifnot(packageVersion("pomp")>="3.5")
 library(ggplot2)
 library(scales)
 library(sp)
 library(ncf)
-theme_set(theme_bw())
-```
 
+options(
+  keep.source=TRUE,
+  stringsAsFactors=FALSE,
+  knitr.kable.NA="",
+  readr.show_types=FALSE,
+  dplyr.summarise.inform=FALSE,
+  encoding="UTF-8",
+  aakmisc.dbname="ewmeasles",
+  aakmisc.remotehost="kinglab.eeb.lsa.umich.edu",
+  aakmisc.user="gravity"
+)
+theme_set(theme_bw())
+set.seed(594709947L)
+```
+ 
 The data are measles case reports, population sizes, and weekly numbers of live births, from 954 population centers (cities, towns, villages) in England and Wales.
 The data are the same as those analyzed in @Lau2020.
 [The github repo for that paper](https://github.com/msylau/measles_competing_risks) is the definitive source.
@@ -138,7 +135,7 @@ In the above:
 
 ## Fadeouts
 
-```{r fadeout-plot,fig.height=4.4,purl=FALSE}
+```{r fadeout-plot,fig.height=4.4,purl=FALSE,cache=TRUE}
 dat %>%
   ddply(~town,summarize,
         efrac=(sum(cases==0)+0.5)/(length(cases)+0.5),
@@ -241,8 +238,8 @@ bake(file="under-reporting.rds",{
     cumcases <- cumsum(d$cases)
     fit <- smooth.spline(cumbirths,cumcases,df=2.5)
     mutate(d,
-           ur=predict(fit,x=cumbirths,deriv=1)$y,
-           I=cases/ur)
+      ur=predict(fit,x=cumbirths,deriv=1)$y,
+      I=cases/ur)
   } -> dat
 }) -> dat
 ```
@@ -275,10 +272,10 @@ Population size is assumed constant at its median value.
 bake(file="data-matrix.rds",{
   dat %>%
     ddply(~town,mutate,
-          Ilag=c(NA,head(I,-1)),
-          zlag=c(NA,head(z,-1)),
-          Ps=median(pop),
-          seas=factor(biweek,levels=1:26)) %>%
+      Ilag=c(NA,head(I,-1)),
+      zlag=c(NA,head(z,-1)),
+      Ps=median(pop),
+      seas=factor(biweek,levels=1:26)) %>%
     ddply(~town,tail,-1) -> dat
 }) -> dat
 ```
@@ -321,7 +318,6 @@ bake(file="sigma-profile.rds",{
         sum() -> dev
       data.frame(sigma=sigma,dev=dev)
     } -> sigmaProf
-  
 }) -> sigmaProf
 ```
 
@@ -341,7 +337,7 @@ bake(file="sigma-bar.rds",{
 dat %>% mutate(Slag=sigmaBar*Ps+zlag) -> dat
 ```
 
-```{r sigma-profile-plot,purl=FALSE}
+```{r sigma-profile-plot,purl=FALSE,cache=TRUE}
 sigmaProf %>% ggplot(aes(x=sigma,y=dev))+geom_line()
 ```
 
@@ -393,7 +389,7 @@ bake(file="tsir-fits.rds",{
 
 Just for interest, let's plot $R_0$ as a function of city size.
 
-```{r R0-plot,purl=FALSE}
+```{r R0-plot,purl=FALSE,cache=TRUE}
 dat %>% 
   ddply(~town,summarize,N=mean(Ps),
         beta=exp(mean(log.beta)),R0=beta*N) %>%
@@ -429,7 +425,7 @@ It also picks out the relevant observations.
 These are the ones for which the preceding week saw zero cases.
 
 
-```{r gravity-pre,purl=TRUE}
+```{r gravity-pre,purl=TRUE,cache=TRUE}
 readRDS("tsir-fits.rds") -> dat
 dat %>% acast(town~year+biweek,value.var="ylag") -> ylag
 dat %>% acast(town~year+biweek,value.var="Slag") -> slag
@@ -459,12 +455,9 @@ obs <- obs[relevant]
 betaS <- beta[relevant]*slag[relevant]
 ```
 
-```{r startMPI,cache=FALSE,include=FALSE,purl=TRUE}
-if (file.exists("CLUSTER")) {
-  scan("CLUSTER",what=integer(0)) -> ncpu
-  library(doMPI)
-  cl <- startMPIcluster(ncpu,verbose=TRUE,logdir="/tmp")
-  registerDoMPI(cl)
+```{r cluster_setup,cache=FALSE,include=FALSE,purl=TRUE}
+if (file.exists("CLUSTER.R")) {
+  source("CLUSTER.R")
 } else {
   library(doParallel)
   registerDoParallel()
@@ -487,7 +480,7 @@ $$\mathrm{diag}(A)\,B=A\;*\;B.$$
 
 
 The negative log likelihood function for the gravity model is:
-```{r gravity-like,purl=TRUE}
+```{r gravity-like,purl=TRUE,cache=TRUE}
 likfnGravity <- function (theta, phi, rho, psi, tau1, tau2) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -501,15 +494,15 @@ likfnGravity <- function (theta, phi, rho, psi, tau1, tau2) {
 
 Now we'll do a likelihood profile over $\tau_1$ and $\tau_2$.
 
-```{r gravity-profile-2D,cache=FALSE,purl=TRUE}
+```{r gravity-profile-2D,purl=TRUE}
 bake(file="gravity.rds",{
   
-  grd <- profileDesign(
+  grd <- profile_design(
     tau1=seq(0.1, 1.4, length=25),
     tau2=seq(-1, 1, length=25),
     lower=c(psi=log(5),theta=log(1e-8),phi=log(1e-6),rho=log(0.9)),
     upper=c(psi=log(7),theta=log(1),phi=log(1e-2),rho=log(1.7)),
-    nprof=10
+    nprof=10, type="sobol"
   )
   
   foreach(start=iter(grd,"row"),
@@ -604,7 +597,7 @@ bake("gravity-mle.rds",{
 }) -> mle.grav
 ```
 
-```{r gravity-results,purl=FALSE}
+```{r gravity-results,purl=FALSE,cache=TRUE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -657,7 +650,7 @@ Halted because roundoff errors limited progress. (In this case, the optimization
 - NLOPT_FORCED_STOP = -5
 Halted because of a forced termination: the user called nlopt_force_stop(opt) on the optimization’s  nlopt_opt object opt from the user’s objective function or constraints.
 
-```{r gravity-pairsplot,fig.height=6.83,purl=FALSE}
+```{r gravity-pairsplot,fig.height=6.83,purl=FALSE,cache=TRUE}
 pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik)-10000,cex=0.5)
@@ -679,7 +672,7 @@ $$\iota = \theta\,\mathrm{diag}(N^{\tau_1})\,Q^T\,y^{\tau_2}+\phi\,N^{\tau_1}.$$
 
 The negative log likelihood function for the @xia2004measles model is:
 
-```{r xia-like,purl=TRUE}
+```{r xia-like,purl=TRUE,cache=TRUE}
 likfnXia <- function (theta, phi, rho, psi, tau1, tau2) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -750,7 +743,7 @@ bake("xia-mle.rds",{
 }) -> mle.xia
 ```
 
-```{r xia-results,purl=FALSE}
+```{r xia-results,purl=FALSE,cache=TRUE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -773,7 +766,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r xia-pairsplot,fig.height=6.83,purl=FALSE}
+```{r xia-pairsplot,fig.height=6.83,purl=FALSE,cache=TRUE}
 pairs(~loglik+theta+phi+rho+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik)-10000,cex=0.5)
@@ -785,7 +778,7 @@ By setting $\rho = 0$ and $\tau_1=\tau_2=1$ in the gravity model, we obtain mean
 
 
 The negative log likelihood function for the mean-field model is:
-```{r meanfield-like,purl=TRUE}
+```{r meanfield-like,purl=TRUE,cache=TRUE}
 likfnMeanField <- function (theta, phi, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -801,7 +794,7 @@ Now we find the MLE.
 ```{r meanfield-optim,cache=FALSE,purl=TRUE}
 bake(file="meanfield.rds",{
 
-  grd <- sobolDesign(
+  grd <- sobol_design(
     lower=c(psi=log(5),theta=log(1e-8),phi=log(1e-6)),
     upper=c(psi=log(7),theta=log(1),phi=log(1e-2)),
     nseq=250
@@ -875,7 +868,7 @@ bake(file="meanfield.rds",{
 }) -> results
 ```
 
-```{r meanfield-pairsplot,fig.height=6.83,purl=FALSE}
+```{r meanfield-pairsplot,fig.height=6.83,purl=FALSE,cache=TRUE}
 pairs(~loglik+theta+phi+psi,
   data=results %>%
     extract(!sapply(results,inherits,"try-error")) %>%
@@ -907,7 +900,7 @@ bake("meanfield-mle.rds",{
 }) -> mle.meanfield
 ```
 
-```{r meanfield-results,purl=FALSE}
+```{r meanfield-results,purl=FALSE,cache=TRUE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -927,7 +920,7 @@ results %>% count(~conv)
 By setting $\tau_1 = \tau_2 = 0$ in the gravity model, we obtain a diffusion model, which couples cities in a way that depends only on the distance between them.
 
 The negative log likelihood function for the diffusion model is:
-```{r diffusion-like,purl=TRUE}
+```{r diffusion-like,purl=TRUE,cache=TRUE}
 likfnDiffusion <- function (theta, phi, rho, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -944,11 +937,11 @@ Now we'll do a likelihood profile over $\tau_1$ and $\tau_2$.
 ```{r diffusion-profile-2D,cache=FALSE,purl=TRUE}
 bake(file="diffusion.rds",{
 
-  grd <- profileDesign(
+  grd <- profile_design(
     rho = seq(log(1),log(3),length=50),
     lower=c(psi=log(5),theta=log(1e-8),phi=log(1e-6)),
     upper=c(psi=log(7),theta=log(1),phi=log(1e-2)),
-    nprof=10
+    nprof=10, type="sobol"
   )
   
   foreach(start=iter(grd,"row"),
@@ -1043,7 +1036,7 @@ bake("diffusion-mle.rds",{
 }) -> mle.diffusion
 ```
 
-```{r diffusion-results,purl=FALSE}
+```{r diffusion-results,purl=FALSE,cache=TRUE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1062,7 +1055,7 @@ results %>%
   labs(x=expression(rho),y=expression(log(L)))
 ```
 
-```{r diffusion-pairsplot,fig.height=6.83,purl=FALSE}
+```{r diffusion-pairsplot,fig.height=6.83,purl=FALSE,cache=TRUE}
 pairs(~loglik+theta+phi+psi+rho,
   data=results,
   subset=loglik>max(loglik)-10000,cex=0.5)
@@ -1084,7 +1077,7 @@ $$\iota_i=N_i^{\tau_1}\,\left(\theta\,\sum_j Q_{ji}\,R_{ji}^\delta\,y_{j}+\phi\r
 
 The negative log likelihood function for the competing destinations model is:
 
-```{r compdest-like,purl=TRUE}
+```{r compdest-like,purl=TRUE,cache=TRUE}
 iii <- 1-diag(length(N))
 
 likfnCompDest <- function (theta, phi, rho, psi, tau1, tau2, delta) {
@@ -1104,12 +1097,12 @@ We compute the profile likelihood as before.
 ```{r compdest-profile-2D,cache=FALSE,purl=TRUE}
 bake(file="compdest.rds",{
   
-  grd <- profileDesign(
+  grd <- profile_design(
     tau1=seq(0.1, 1.4, length=25),
     tau2=seq(-1, 1, length=25),
     lower=c(psi=log(5),theta=log(0.1),phi=log(1e-6),rho=log(1.5),delta=-3),
     upper=c(psi=log(7),theta=log(45),phi=log(1e-2),rho=log(30),delta=0),
-    nprof=20
+    nprof=20, type="sobol"
   )
   
   foreach(start=iter(grd,"row"),
@@ -1182,7 +1175,7 @@ bake(file="compdest.rds",{
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
 
-```{r compdest-mle,cache=FALSE}
+```{r compdest-mle}
 bake("compdest-mle.rds",{
   
   results %>%
@@ -1204,7 +1197,7 @@ bake("compdest-mle.rds",{
 ```
 
 
-```{r compdest-results,purl=TRUE}
+```{r compdest-results,purl=TRUE,cache=TRUE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1218,7 +1211,7 @@ results %>%
 results %>% count(~conv)
 ```
 
-```{r compdest-plot,purl=FALSE}
+```{r compdest-plot,purl=FALSE,cache=TRUE}
 results %>%
   ggplot(aes(x=tau1,y=tau2,z=loglik,
     fill=ifelse(loglik>max(loglik)-2000,loglik,NA)))+
@@ -1229,24 +1222,30 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r compdest-pairsplot,fig.height=6.83,purl=FALSE}
-pairs(~loglik+theta+phi+rho+delta+psi+tau1+tau2,
-  data=results,
-  subset=loglik>max(loglik)-10000,cex=0.5)
+```{r compdest-pairsplot,fig.height=6.83,purl=FALSE,cache=TRUE}
+results %>%
+  dplyr::filter(
+           loglik>max(loglik)-10000,
+           theta<1e6
+         ) %>%
+  {
+    pairs(~loglik+theta+phi+rho+delta+psi+tau1+tau2,
+      data=.,cex=0.5)
+  }
 ```
 
 ## One-D profiles
 
 ### $\delta$
 
-```{r compdest-profile-delta,cache=FALSE,purl=TRUE}
+```{r compdest-profile-delta,purl=TRUE}
 bake(file="compdest_delta.rds",{
   
-  grd <- profileDesign(
+  grd <- profile_design(
     delta=seq(-1.6,0,length=250),
     lower=c(tau1=0.1,tau2=-1,psi=log(5),theta=log(0.1),phi=log(1e-6),rho=log(1.5)),
     upper=c(tau1=1.4,tau2=1,psi=log(7),theta=log(45),phi=log(1e-2),rho=log(30)),
-    nprof=50
+    nprof=50, type="sobol"
   )
   
   foreach(start=iter(grd,"row"),
@@ -1317,7 +1316,7 @@ bake(file="compdest_delta.rds",{
 }) -> res1
 ```
 
-```{r compdest-profile-delta-plot,purl=FALSE}
+```{r compdest-profile-delta-plot,purl=FALSE,cache=TRUE}
 res1 %>%
   ldply() %>%
   ggplot(aes(x=delta,y=loglik))+
@@ -1331,11 +1330,11 @@ The above was completed in `r round(attr(res1,"system.time")[3]/60,1)`&nbsp;min 
 ```{r compdest-profile-tau1,cache=FALSE,purl=TRUE}
 bake(file="compdest_tau1.rds",{
   
-  grd <- profileDesign(
+  grd <- profile_design(
     tau1=seq(0.1,1.4,length=250),
     lower=c(tau2=-1,psi=log(5),theta=log(0.1),phi=log(1e-6),rho=log(1.5),delta=-3),
     upper=c(tau2=1,psi=log(7),theta=log(45),phi=log(1e-2),rho=log(30),delta=0),
-    nprof=50
+    nprof=50, type="sobol"
   )
   
   foreach(start=iter(grd,"row"),
@@ -1406,7 +1405,7 @@ bake(file="compdest_tau1.rds",{
 }) -> res2
 ```
 
-```{r compdest-profile-tau1-plot,purl=FALSE}
+```{r compdest-profile-tau1-plot,purl=FALSE,cache=TRUE}
 res2 %>%
   ldply() %>%
   ggplot(aes(x=tau1,y=loglik))+
@@ -1420,11 +1419,11 @@ The above was completed in `r round(attr(res2,"system.time")[3]/60,1)`&nbsp;min 
 ```{r compdest-profile-tau2,cache=FALSE,purl=TRUE}
 bake(file="compdest_tau2.rds",{
   
-  grd <- profileDesign(
+  grd <- profile_design(
     tau2=seq(-1,1,length=250),
     lower=c(tau1=0.1,psi=log(5),theta=log(0.1),phi=log(1e-6),rho=log(1.5),delta=-3),
     upper=c(tau1=1.4,psi=log(7),theta=log(45),phi=log(1e-2),rho=log(30),delta=0),
-    nprof=50
+    nprof=50, type="sobol"
   )
   
   foreach(start=iter(grd,"row"),
@@ -1495,7 +1494,7 @@ bake(file="compdest_tau2.rds",{
 }) -> res3
 ```
 
-```{r compdest-profile-tau2-plot,purl=FALSE}
+```{r compdest-profile-tau2-plot,purl=FALSE,cache=TRUE}
 res3 %>%
   ldply() %>%
   ggplot(aes(x=tau2,y=loglik))+
@@ -1515,7 +1514,7 @@ $$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S(i,
 
 
 
-```{r rankmat,cache=FALSE,purl=TRUE}
+```{r rankmat,purl=TRUE}
 bake(file="rankmat.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
@@ -1530,7 +1529,7 @@ bake(file="rankmat.rds",{
 
 The negative log likelihood function for the @xia2004measles model is:
 
-```{r stouffer-like,purl=TRUE}
+```{r stouffer-like,purl=TRUE,cache=TRUE}
 likfnStouffer <- function (theta, phi, tau1, tau2, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -1542,7 +1541,7 @@ likfnStouffer <- function (theta, phi, tau1, tau2, psi) {
 
 We compute the profile likelihood as before.
 
-```{r stouffer-profile-2D,cache=FALSE,purl=TRUE}
+```{r stouffer-profile-2D}
 bake(file="stouffer.rds",{
   
   grd <- expand.grid(
@@ -1577,7 +1576,7 @@ bake(file="stouffer.rds",{
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
 
-```{r stouffer-mle,cache=FALSE}
+```{r stouffer-mle}
 bake("stouffer-mle.rds",{
   
   results %>%
@@ -1598,7 +1597,7 @@ bake("stouffer-mle.rds",{
 }) -> mle.stouffer
 ```
 
-```{r stouffer-results,purl=FALSE}
+```{r stouffer-results,purl=FALSE,cache=TRUE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1622,7 +1621,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r stouffer-pairsplot,fig.height=6.83,purl=FALSE}
+```{r stouffer-pairsplot,fig.height=6.83,purl=FALSE,cache=TRUE}
 pairs(~loglik+theta+phi+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
@@ -1638,7 +1637,7 @@ Note that $S'(i,j)$ includes $i$, whilst $S(i,j)$ does not.
 $$\iota_i = N_i^{\tau_1}\,\left(\theta\,\sum_j\!\left(\frac{N_j}{\sum_{k\in S'(i,j)}{N_k}}\right)^{\tau_2}\,\frac{I_j}{N_j}+\phi\right)$$
 
 
-```{r rankmat1,cache=FALSE,purl=TRUE}
+```{r rankmat1}
 bake(file="rankmat1.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
@@ -1651,7 +1650,7 @@ bake(file="rankmat1.rds",{
 }) -> rr
 ```
 
-```{r stouffer1-like,purl=TRUE}
+```{r stouffer1-like,purl=TRUE,cache=TRUE}
 likfnStouffer1 <- function (theta, phi, tau1, tau2, psi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -1663,7 +1662,7 @@ likfnStouffer1 <- function (theta, phi, tau1, tau2, psi) {
 
 The profile likelihood computation.
 
-```{r stouffer1-profile-2D,cache=FALSE,purl=TRUE}
+```{r stouffer1-profile-2D}
 bake(file="stouffer1.rds",{
   
   grd <- expand.grid(
@@ -1698,7 +1697,7 @@ bake(file="stouffer1.rds",{
 
 The above was completed in `r round(attr(results,"system.time")[3]/60,1)`&nbsp;min on a `r attr(results,"nproc")`-core cluster. 
 
-```{r stouffer1-mle,cache=FALSE}
+```{r stouffer1-mle}
 bake("stouffer1-mle.rds",{
   
   results %>%
@@ -1719,7 +1718,7 @@ bake("stouffer1-mle.rds",{
 }) -> mle.stouffer1
 ```
 
-```{r stouffer1-results,purl=FALSE}
+```{r stouffer1-results,purl=FALSE,cache=TRUE}
 results %>%
   extract(sapply(results,inherits,"try-error")) %>%
   sapply(as.character) %>%
@@ -1742,7 +1741,7 @@ results %>%
   labs(x=expression(tau[1]),y=expression(tau[2]),fill=expression(log(L)))
 ```
 
-```{r stouffer1-pairsplot,fig.height=6.83,purl=FALSE}
+```{r stouffer1-pairsplot,fig.height=6.83,purl=FALSE,cache=TRUE}
 pairs(~loglik+theta+phi+psi+tau1+tau2,
   data=results,
   subset=loglik>max(loglik,na.rm=TRUE)-10000,cex=0.5)
@@ -1752,7 +1751,7 @@ pairs(~loglik+theta+phi+psi+tau1+tau2,
 
 $$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S(i,j)} N_k)(N_j + N_i + \sum_{k \in S(i,j)} N_k)} \frac{I_j}{N_j}$$
 
-```{r radmat,cache=FALSE,purl=TRUE}
+```{r radmat}
 bake(file="radmat.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
@@ -1766,7 +1765,7 @@ bake(file="radmat.rds",{
 }) -> rr
 ```
 
-```{r radiation-like}
+```{r radiation-like,cache=TRUE}
 likfnRadiation <- function (theta, psi) {
   theta <- exp(theta)
   iota <- theta*(rr%*%ylag)
@@ -1775,7 +1774,7 @@ likfnRadiation <- function (theta, psi) {
 }
 ```
 
-```{r radiation-mle,cache=FALSE}
+```{r radiation-mle}
 bake(file="radiation-mle.rds",{
   mle2(likfnRadiation,
     method="Nelder-Mead",
@@ -1785,7 +1784,7 @@ bake(file="radiation-mle.rds",{
 }) -> fit
 ```
 
-```{r radiation-results,purl=FALSE}
+```{r radiation-results,purl=FALSE,cache=TRUE}
 summary(fit)
 logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
@@ -1796,7 +1795,7 @@ c(coef(fit),loglik=logLik(fit)) %>%
 
 $$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j + N_i + \sum_{k \in S'(i,j)} N_k)} \frac{I_j}{N_j}$$
 
-```{r radmat1,cache=FALSE,purl=TRUE}
+```{r radmat1}
 bake(file="radmat1.rds",{
   rr <- array(dim=dim(distances),dimnames=dimnames(distances))
   for (i in seq_along(N)) {
@@ -1810,7 +1809,7 @@ bake(file="radmat1.rds",{
 }) -> rr
 ```
 
-```{r radiation1-like}
+```{r radiation1-like,cache=TRUE}
 likfnRadiation1 <- function (theta, psi) {
   theta <- exp(theta)
   iota <- theta*(rr%*%ylag)
@@ -1819,7 +1818,7 @@ likfnRadiation1 <- function (theta, psi) {
 }
 ```
 
-```{r radiation1-mle,cache=FALSE}
+```{r radiation1-mle}
 bake(file="radiation1-mle.rds",{
   mle2(likfnRadiation1,
     method="Nelder-Mead",
@@ -1829,7 +1828,7 @@ bake(file="radiation1-mle.rds",{
 }) -> fit
 ```
 
-```{r radiation1-results,purl=FALSE}
+```{r radiation1-results,purl=FALSE,cache=TRUE}
 summary(fit)
 logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
@@ -1847,7 +1846,7 @@ $$\iota_i=\theta \sum_j N_j \frac{N_j N_i}{(N_j + \sum_{k \in S'(i,j)} N_k)(N_j 
 readRDS("radmat1.rds") -> rr
 ```
 
-```{r xrad1-like}
+```{r xrad1-like,cache=TRUE}
 likfnXRad1 <- function (theta, psi, phi) {
   theta <- exp(theta)
   phi <- exp(phi)
@@ -1857,7 +1856,7 @@ likfnXRad1 <- function (theta, psi, phi) {
 }
 ```
 
-```{r xrad1-mle,cache=FALSE}
+```{r xrad1-mle}
 bake(file="xrad1-mle.rds",{
   mle2(likfnXRad1,
     method="Nelder-Mead",
@@ -1867,7 +1866,7 @@ bake(file="xrad1-mle.rds",{
 }) -> fit
 ```
 
-```{r xrad1-results,purl=FALSE}
+```{r xrad1-results,purl=FALSE,cache=TRUE}
 summary(fit)
 logLik(fit)
 c(coef(fit),loglik=logLik(fit)) %>%
@@ -1877,7 +1876,7 @@ c(coef(fit),loglik=logLik(fit)) %>%
 
 # Model comparison
 
-```{r modelcomp,cache=FALSE,echo=FALSE,purl=FALSE}
+```{r modelcomp,echo=FALSE,purl=FALSE}
 summaryGravity <- function (mle) {
   npar <- 6
   mle %$% {
@@ -2058,7 +2057,7 @@ tab %>%
   kable(digits=3)
 ```
 
-```{r latex_table,include=FALSE,purl=FALSE}
+```{r latex_table,include=FALSE,purl=FALSE,cache=TRUE}
 library(xtable)
 library(tibble)
 tab %>%
@@ -2091,7 +2090,7 @@ print(xtab,sanitize.colnames.function=identity,floating=FALSE,
 
 We can predict importation rates from fitted models
 
-```{r matrices,purl=FALSE}
+```{r matrices,purl=FALSE,cache=TRUE}
 #Gravity
 readRDS("gravity-mle.rds") %$% {
   theta <- exp(theta)
@@ -2159,34 +2158,36 @@ mle.xrad1 %$% {
 ```
 
 ```{r import_export,purl=FALSE}
-data.frame(
-  SV_import=SVmat %>% rowMeans(),
-  S_import=STmat %>% rowMeans(),
-  G_import=GRmat %>% rowMeans(),
-  CD_import=CDmat %>% rowMeans(),
-  RV_import=RVmat %>% rowMeans(),
-  R_import=RDmat %>% rowMeans(),
-  XR_import=XRmat %>% rowMeans(),
-  SV_export=SVmat %>% colMeans(),
-  S_export=STmat %>% colMeans(),
-  G_export=GRmat %>% colMeans(),
-  CD_export=CDmat %>% colMeans(),
-  RV_export=RVmat %>% colMeans(),
-  R_export=RDmat %>% colMeans(),
-  XR_export=XRmat %>% colMeans(),
-  N=N
-) %>% 
-  name_rows() %>%
-  dplyr::rename(town=.rownames) %>%
-  tidyr::gather(variable,value,-N,-town) %>%
-  tidyr::separate(variable,into=c("model","variable")) %>%
-  tidyr::spread(variable,value) %>%
-  dplyr::arrange(-N,town,model) %>%
-  dplyr::mutate(erate=export/N,irate=import/N) %>%
-  join(coords,by="town") -> impexp
+bake("impexp.rds",info=FALSE,{
+  data.frame(
+    SV_import=SVmat %>% rowMeans(),
+    S_import=STmat %>% rowMeans(),
+    G_import=GRmat %>% rowMeans(),
+    CD_import=CDmat %>% rowMeans(),
+    RV_import=RVmat %>% rowMeans(),
+    R_import=RDmat %>% rowMeans(),
+    XR_import=XRmat %>% rowMeans(),
+    SV_export=SVmat %>% colMeans(),
+    S_export=STmat %>% colMeans(),
+    G_export=GRmat %>% colMeans(),
+    CD_export=CDmat %>% colMeans(),
+    RV_export=RVmat %>% colMeans(),
+    R_export=RDmat %>% colMeans(),
+    XR_export=XRmat %>% colMeans(),
+    N=N
+  ) %>% 
+    name_rows() %>%
+    dplyr::rename(town=.rownames) %>%
+    tidyr::gather(variable,value,-N,-town) %>%
+    tidyr::separate(variable,into=c("model","variable")) %>%
+    tidyr::spread(variable,value) %>%
+    dplyr::arrange(-N,town,model) %>%
+    dplyr::mutate(erate=export/N,irate=import/N) %>%
+    join(coords,by="town")
+}) -> impexp
 ```
 
-```{r imp_exp_by_size,fig.height=6.83,purl=FALSE}
+```{r imp_exp_by_size,fig.height=6.83,purl=FALSE,cache=TRUE}
 impexp %>%
   dplyr::select(town,N,model,export=erate,import=irate) %>%
   dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
@@ -2197,40 +2198,37 @@ impexp %>%
   ggplot(aes(x=N,y=value))+
   geom_point(alpha=0.3,size=0.1)+
   scale_x_log10(breaks=c(1e3,1e4,1e5,1e6),
-                labels=c(
-                  expression(10^{3}),
-                  expression(10^{4}),
-                  expression(10^{5}),
-                  expression(10^{6})
-                  )
-                )+
+    labels=c(
+      expression(10^{3}),
+      expression(10^{4}),
+      expression(10^{5}),
+      expression(10^{6})
+    )
+  )+
   scale_y_log10(breaks=c(1e-6,1e-5,1e-4,1e-3),
-                labels=c(
-                  expression(10^{-6}),
-                  expression(10^{-5}),
-                  expression(10^{-4}),
-                  expression(10^{-3})
-                  )
-                )+
+    labels=c(
+      expression(10^{-6}),
+      expression(10^{-5}),
+      expression(10^{-4}),
+      expression(10^{-3})
+    )
+  )+
   labs(x="community size (inhabitants)",y="rate (per inhabitant per biweek)")+
   facet_grid(model~rate)
 ```
 
 ## Overall import and export rates
 
-```{r imp_exp_maps,message=FALSE,results="hide",purl=FALSE}
+```{r imp_exp_maps,message=FALSE,results="hide",purl=FALSE,cache=TRUE}
 readRDS("BritishIsles.rds") -> gb
 gb %>%
   subset(NAME_1 %in% c("England","Wales")) %>%
   bbox() -> bbox
-
 ```
   
-```{r ratemaps,message=FALSE,results="hide",purl=FALSE}
-stew(
-  file="ratemaps.rda",
-  dependson=list(impexp),
-  {
+```{r ied,message=FALSE,results="hide",purl=FALSE}
+bake(file="ied.rds",
+  dependson=impexp,{
     impexp %>%
       dplyr::select(town,model,export=erate,import=irate) %>%
       dplyr::filter(model %in% c("XR","G","CD","SV")) %>%
@@ -2245,92 +2243,94 @@ stew(
       ) %>%
       dplyr::filter(m1 > m2) %>% 
       dplyr::left_join(coords,by="town") -> ied
-    
-    expand.grid(m2=1:4,m1=1:4) %>%
-      dplyr::filter(m1<m2) %>%
-      dplyr::mutate(
-               model1=c("SV","CD","G","XR")[m1],
-               model2=c("SV","CD","G","XR")[m2]
-             ) -> comps
-    
-    foreach (c=iter(comps,"row")) %do% {
-      ied %>%
-        dplyr::filter(m1==c$model1 & m2==c$model2) %>%
-        arrange(variable,abs(value)) -> d
-      gb %>%
-        ggplot(aes(x=long,y=lat))+
-        geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-        coord_map(projection="gilbert")+
-        lims(x=bbox["x",],y=bbox["y",])+
-        geom_point(
-          data=d,
-          aes(x=long,y=lat,color=value),
-          size=1
-        )+
-        guides(alpha="none")+
-        scale_color_gradient2(mid="gray90")+
-        labs(title="differences in predicted per capita import and export rates",
-          subtitle=sprintf("%s - %s",c$model1,c$model2),
-          color="",x="",y="")+
-        facet_wrap(~variable,nrow=1)+
-        theme(axis.text=element_blank()) -> pl
-    } -> ratemaps
-  }) -> ratemaps
+  }) -> ied
+```
 
+```{r ratemaps,message=FALSE,results="hide",purl=FALSE,cache=TRUE}
+expand.grid(m2=1:4,m1=1:4) %>%
+  dplyr::filter(m1<m2) %>%
+  dplyr::mutate(
+           model1=c("SV","CD","G","XR")[m1],
+           model2=c("SV","CD","G","XR")[m2]
+         ) -> comps
+
+foreach (c=iter(comps,"row")) %do% {
+  ied %>%
+    dplyr::filter(m1==c$model1 & m2==c$model2) %>%
+    arrange(variable,abs(value)) -> d
+  gb %>%
+    ggplot(aes(x=long,y=lat))+
+    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+    coord_map(projection="gilbert")+
+    lims(x=bbox["x",],y=bbox["y",])+
+    geom_point(
+      data=d,
+      aes(x=long,y=lat,color=value),
+      size=1
+    )+
+    guides(alpha="none")+
+    scale_color_gradient2(mid="gray90")+
+    labs(title="differences in predicted per capita import and export rates",
+      subtitle=sprintf("%s - %s",c$model1,c$model2),
+      color="",x="",y="")+
+    facet_wrap(~variable,nrow=1)+
+    theme(axis.text=element_blank()) -> pl
+} -> ratemaps
+```
+```{r show_ratemaps,cache=TRUE,purl=FALSE,eval=FALSE}
 print(ratemaps)
 ```
 
-```{r sv_g_imp_exp,include=FALSE,purl=FALSE}
-stew(
-  file="sv_g_imp_exp.rda",
-  dependson=list(ied),
-  {
-    ied %>%
-      dplyr::filter(m1=="SV" & m2=="G") %>%
-      arrange(variable,abs(value)) -> d
-    
-    d %>%
-      summarize(min=min(value),max=max(value)) -> dr
-    
-    gb %>%
-      ggplot(aes(x=long,y=lat))+
-      geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-      coord_map(projection="gilbert")+
-      lims(x=bbox["x",],y=bbox["y",])+
-      geom_point(
-        data=dplyr::filter(d,variable=="import"),
-        aes(x=long,y=lat,color=value),
-        size=1
-      )+
-      guides(alpha="none")+
-      ##  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
-      scale_color_gradient2(mid="gray90")+
-      labs(color="import rate",x="",y="")+
-      theme(axis.text=element_blank()) -> sv_g_imp
-    
-    gb %>%
-      ggplot(aes(x=long,y=lat))+
-      geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-      coord_map(projection="gilbert")+
-      lims(x=bbox["x",],y=bbox["y",])+
-      geom_point(
-        data=dplyr::filter(d,variable=="export"),
-        aes(x=long,y=lat,color=value),
-        size=1
-      )+
-      guides(alpha="none")+
-      ##  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
-      scale_color_gradient2(mid="gray90")+
-      labs(color="export rate",x="",y="")+
-      theme(axis.text=element_blank()) -> sv_g_exp
-  })
+```{r sv_g_imp_exp,include=FALSE,purl=FALSE,cache=TRUE}
+ied %>%
+  dplyr::filter(m1=="SV" & m2=="G") %>%
+  arrange(variable,abs(value)) -> d
+
+d %>%
+  summarize(min=min(value),max=max(value)) -> dr
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  geom_point(
+    data=dplyr::filter(d,variable=="import"),
+    aes(x=long,y=lat,color=value),
+    size=1
+  )+
+  guides(alpha="none")+
+  ##  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
+  scale_color_gradient2(mid="gray90")+
+  labs(color="import rate",x="",y="")+
+  theme(axis.text=element_blank()) -> sv_g_imp
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  geom_point(
+    data=dplyr::filter(d,variable=="export"),
+    aes(x=long,y=lat,color=value),
+    size=1
+  )+
+  guides(alpha="none")+
+  ##  scale_color_gradient2(mid="gray90",limits=c(dr$min,dr$max))+
+  scale_color_gradient2(mid="gray90")+
+  labs(color="export rate",x="",y="")+
+  theme(axis.text=element_blank()) -> sv_g_exp
+```
+```{r show_svg_maps,cache=TRUE,purl=FALSE,eval=FALSE}
+print(sv_g_exp)
+print(sv_g_imp)
 ```
 
 ## Fadeout residuals
 
 Let's make a spatial plot of the residuals of the logit-log relationship between fadeouts and population size.
 
-```{r spatial_fadeouts,results="hide",purl=FALSE}
+```{r spatial_fadeouts,results="hide",purl=FALSE,cache=TRUE}
 fadeouts %>%
   dplyr::left_join(coords,by="town") %>%
   arrange(abs(residual)) -> fo
@@ -2348,14 +2348,13 @@ gb %>%
   labs(color="",x="",y="")+
   coord_map(projection="gilbert")+
   lims(x=bbox["x",],y=bbox["y",])+
-  theme(axis.text=element_blank()) -> spat_fo
-
-print(spat_fo)
+  theme(axis.text=element_blank()) %>%
+  print()
 ```
 
 ## Likelihood differences
 
-```{r loglik_matrices,purl=FALSE,results="hide"}
+```{r loglik_matrices,purl=FALSE,results="hide",cache=TRUE}
 dat %>% acast(town~year+biweek,value.var="cases") -> obs1
 
 likGravity <- function (mle) {
@@ -2449,210 +2448,184 @@ stew(
 ```
 
 ```{r loglik_by_size,purl=FALSE,results="hide"}
-bake(
-  file="loglik_by_size.rds",
-  dependson=list(comps,spatialLiks),
-  {
-    foreach (c=iter(comps,"row")) %do% {
-      
-      spatialLiks %>% 
-        dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
-        dplyr::mutate(
-                 model=factor(model,levels=c("SV","XR","CD","G"))
-               ) %>%
-        dplyr::filter(model==c$model1) %>%
-        dplyr::select(model,town,N,value) -> d1
-      spatialLiks %>% 
-        dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
-        dplyr::mutate(
-                 model=factor(model,levels=c("SV","XR","CD","G"))
-               ) %>%
-        dplyr::filter(model==c$model2) %>%
-        dplyr::select(model,town,N,value) -> d2
-      dplyr::full_join(d1,d2,by=c("town","N"),
-        suffix=c("_1","_2")) %>%
-        mutate(diff=value_1-value_2) -> dd
-      
-      dd %>%
-        ggplot(aes(x=N,y=diff,color=diff>0,group=1))+
-        geom_point()+
-        scale_x_log10()+
-        guides(color="none")+
-        geom_smooth(method="loess")+
-        scale_color_manual(values=c(`TRUE`=muted("blue"),`FALSE`=muted("red")))+
-        labs(title="mean per datum differences in log likelihood",
-          subtitle=sprintf("%s - %s",c$model1,c$model2),
-          x="",y="",color="") -> pl
-    } -> likpl
-  }) -> likpl
-
+foreach (c=iter(comps,"row")) %do% {
+  spatialLiks %>% 
+    dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
+    dplyr::mutate(
+             model=factor(model,levels=c("SV","XR","CD","G"))
+           ) %>%
+    dplyr::filter(model==c$model1) %>%
+    dplyr::select(model,town,N,value) -> d1
+  spatialLiks %>% 
+    dplyr::filter(model %in% c("SV","CD","G","XR")) %>%
+    dplyr::mutate(
+             model=factor(model,levels=c("SV","XR","CD","G"))
+           ) %>%
+    dplyr::filter(model==c$model2) %>%
+    dplyr::select(model,town,N,value) -> d2
+  dplyr::full_join(d1,d2,by=c("town","N"),
+    suffix=c("_1","_2")) %>%
+    mutate(diff=value_1-value_2) -> dd
+  
+  dd %>%
+    ggplot(aes(x=N,y=diff,color=diff>0,group=1))+
+    geom_point()+
+    scale_x_log10()+
+    guides(color="none")+
+    geom_smooth(method="loess")+
+    scale_color_manual(values=c(`TRUE`=muted("blue"),`FALSE`=muted("red")))+
+    labs(title="mean per datum differences in log likelihood",
+      subtitle=sprintf("%s - %s",c$model1,c$model2),
+      x="",y="",color="") -> pl
+} -> likpl
+```
+```{r show_likpl,cache=TRUE,purl=FALSE}
 print(likpl)
 ```
 
-```{r likmaps,results="hide",purl=FALSE}
-bake(
-  file="likmaps.rds",
-  dependson=list(comps,spatialLiks),
-  {
-    foreach (c=iter(comps,"row")) %do% {
-      
-      spatialLiks %>% dplyr::filter(model==c$model1) -> d1
-      spatialLiks %>% dplyr::filter(model==c$model2) -> d2
-      dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-        suffix=c("_1","_2")) %>%
-        mutate(diff=value_1-value_2) -> dd
-      
-      gb %>%
-        ggplot(aes(x=long,y=lat))+
-        geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-        coord_map(projection="gilbert")+
-        lims(x=bbox["x",],y=bbox["y",])+
-        geom_point(
-          data=dd,
-          aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
-          size=1
-        )+
-        guides(alpha="none")+
-        scale_color_gradient2(mid="gray90")+
-        labs(title="per datum differences in log likelihood",
-          subtitle=sprintf("%s - %s",c$model1,c$model2),
-          x="",y="",color="")+
-        theme(axis.text=element_blank()) -> pl
-      
-    } -> likmaps
-  }) -> likmaps
-
+```{r likmaps,results="hide",purl=FALSE,cache=TRUE}
+foreach (c=iter(comps,"row")) %do% {
+  spatialLiks %>% dplyr::filter(model==c$model1) -> d1
+  spatialLiks %>% dplyr::filter(model==c$model2) -> d2
+  dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+    suffix=c("_1","_2")) %>%
+    mutate(diff=value_1-value_2) -> dd
+  gb %>%
+    ggplot(aes(x=long,y=lat))+
+    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+    coord_map(projection="gilbert")+
+    lims(x=bbox["x",],y=bbox["y",])+
+    geom_point(
+      data=dd,
+      aes(x=long,y=lat,color=diff,alpha=abs(diff)/max(abs(diff))),
+      size=1
+    )+
+    guides(alpha="none")+
+    scale_color_gradient2(mid="gray90")+
+    labs(title="per datum differences in log likelihood",
+      subtitle=sprintf("%s - %s",c$model1,c$model2),
+      x="",y="",color="")+
+    theme(axis.text=element_blank()) -> pl
+} -> likmaps
+```
+```{r show_likmaps,cache=TRUE,purl=FALSE}
 print(likmaps)
 ```
 
-```{r loglik_lisa,results="hide",purl=FALSE}
-bake(
-  file="loglik_lisa.rds",
-  dependson=list(comps,spatialLiks),
-  {
-    foreach (c=iter(comps[c(2,4),],"row")) %do% {
-      
-      spatialLiks %>% dplyr::filter(model==c$model1) -> d1
-      spatialLiks %>% dplyr::filter(model==c$model2) -> d2
-      dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-        suffix=c("_1","_2")) %>%
-        mutate(diff=value_1-value_2) -> dd
-      
-      with(dd,
-        ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
-      ) -> ddlisa
-      
-      dd %>%
-        dplyr::mutate(
-                 corr=ddlisa$correlation,
-                 mean=ddlisa$mean,
-                 p=ddlisa$p
-               ) %>%
-        dplyr::filter(p<0.05) -> dd
+```{r loglik_lisa,results="hide",purl=FALSE,cache=TRUE}
+foreach (c=iter(comps[c(2,4),],"row")) %do% {
+  
+  spatialLiks %>% dplyr::filter(model==c$model1) -> d1
+  spatialLiks %>% dplyr::filter(model==c$model2) -> d2
+  dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+    suffix=c("_1","_2")) %>%
+    mutate(diff=value_1-value_2) -> dd
+  
+  with(dd,
+    ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+  ) -> ddlisa
+  
+  dd %>%
+    dplyr::mutate(
+             corr=ddlisa$correlation,
+             mean=ddlisa$mean,
+             p=ddlisa$p
+           ) %>%
+    dplyr::filter(p<0.05) -> dd
 
-      gb %>%
-        ggplot(aes(x=long,y=lat))+
-        geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-        coord_map(projection="gilbert")+
-        lims(x=bbox["x",],y=bbox["y",])+
-        geom_point(
-          data=dd,
-          aes(x=long,y=lat,color=diff,alpha=0.5),
-          size=1
-        )+
-        guides(alpha="none")+
-        scale_color_gradient2(mid="gray90")+
-        labs(title="significant per datum differences in log likelihood",
-          subtitle=sprintf("%s - %s",c$model1,c$model2),
-          x="",y="",color="")+
-        theme(axis.text=element_blank()) -> pl
-    }
-  }) -> lisamaps
-
+  gb %>%
+    ggplot(aes(x=long,y=lat))+
+    geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+    coord_map(projection="gilbert")+
+    lims(x=bbox["x",],y=bbox["y",])+
+    geom_point(
+      data=dd,
+      aes(x=long,y=lat,color=diff,alpha=0.5),
+      size=1
+    )+
+    guides(alpha="none")+
+    scale_color_gradient2(mid="gray90")+
+    labs(title="significant per datum differences in log likelihood",
+      subtitle=sprintf("%s - %s",c$model1,c$model2),
+      x="",y="",color="")+
+    theme(axis.text=element_blank()) -> pl
+} -> lisamaps
+```
+```{r show_lisamaps,cache=TRUE,purl=FALSE}
 print(lisamaps)
 ```
 
-```{r sv_g_lisa,include=FALSE,purl=FALSE}
-bake(
-  file="sv_g_lisa.rds",
-  dependson=list(comps,spatialLiks),
-  {
-    spatialLiks %>% dplyr::filter(model=="SV") -> d1
-    spatialLiks %>% dplyr::filter(model=="G") -> d2
-    dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-      suffix=c("_1","_2")) %>%
-      mutate(diff=value_1-value_2) -> dd
-    
-    with(dd,
-      ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
-    ) -> ddlisa
-    
-    dd %>%
-      dplyr::mutate(
-               corr=ddlisa$correlation,
-               mean=ddlisa$mean,
-               p=ddlisa$p
-             ) %>%
-      dplyr::filter(p<0.05) -> dd
-    
-    gb %>%
-      ggplot(aes(x=long,y=lat))+
-      geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-      coord_map(projection="gilbert")+
-      lims(x=bbox["x",],y=bbox["y",])+
-      geom_point(
-        data=dd,
-        aes(x=long,y=lat,color=diff,alpha=0.5),
-        size=1
-      )+
-      guides(alpha="none")+
-      scale_color_gradient2(mid="gray90")+
-      labs(x="",y="",color="")+
-      theme(axis.text=element_blank()) -> sv_g_lisa
-  }) -> sv_g_lisa
+```{r sv_g_lisa,include=FALSE,purl=FALSE,cache=TRUE}
+spatialLiks %>% dplyr::filter(model=="SV") -> d1
+spatialLiks %>% dplyr::filter(model=="G") -> d2
+dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+  suffix=c("_1","_2")) %>%
+  mutate(diff=value_1-value_2) -> dd
+
+with(dd,
+  ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+) -> ddlisa
+
+dd %>%
+  dplyr::mutate(
+           corr=ddlisa$correlation,
+           mean=ddlisa$mean,
+           p=ddlisa$p
+         ) %>%
+  dplyr::filter(p<0.05) -> dd
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  geom_point(
+    data=dd,
+    aes(x=long,y=lat,color=diff,alpha=0.5),
+    size=1
+  )+
+  guides(alpha="none")+
+  scale_color_gradient2(mid="gray90")+
+  labs(x="",y="",color="")+
+  theme(axis.text=element_blank()) -> sv_g_lisa
 ```
 
-```{r cd_g_lisa,include=FALSE,purl=FALSE}
-bake(
-  file="cd_g_lisa.rds",
-  dependson=list(comps,spatialLiks),
-  {
-    spatialLiks %>% dplyr::filter(model=="CD") -> d1
-    spatialLiks %>% dplyr::filter(model=="G") -> d2
-    dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
-      suffix=c("_1","_2")) %>%
-      mutate(diff=value_1-value_2) -> dd
-    
-    with(dd,
-      ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
-    ) -> ddlisa
-    
-    dd %>%
-      dplyr::mutate(
-               corr=ddlisa$correlation,
-               mean=ddlisa$mean,
-               p=ddlisa$p
-             ) %>%
-      dplyr::filter(p<0.05) -> dd
+```{r cd_g_lisa,include=FALSE,purl=FALSE,cache=TRUE}
+spatialLiks %>% dplyr::filter(model=="CD") -> d1
+spatialLiks %>% dplyr::filter(model=="G") -> d2
+dplyr::full_join(d1,d2,by=c("town","N","long","lat"),
+  suffix=c("_1","_2")) %>%
+  mutate(diff=value_1-value_2) -> dd
 
-    gb %>%
-      ggplot(aes(x=long,y=lat))+
-      geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
-      coord_map(projection="gilbert")+
-      lims(x=bbox["x",],y=bbox["y",])+
-      geom_point(
-        data=dd,
-        aes(x=long,y=lat,color=diff,alpha=0.5),
-        size=1
-      )+
-      guides(alpha="none")+
-      scale_color_gradient2(mid="gray90")+
-      labs(x="",y="",color="")+
-      theme(axis.text=element_blank())
-  }) -> cd_g_lisa
+with(dd,
+  ncf::lisa(x=long,y=lat,z=diff,neigh=30,latlon=TRUE,quiet=TRUE)
+) -> ddlisa
+
+dd %>%
+  dplyr::mutate(
+           corr=ddlisa$correlation,
+           mean=ddlisa$mean,
+           p=ddlisa$p
+         ) %>%
+  dplyr::filter(p<0.05) -> dd
+
+gb %>%
+  ggplot(aes(x=long,y=lat))+
+  geom_map(aes(map_id=id),map=fortify(gb),fill=NA,color="black",size=0.3)+
+  coord_map(projection="gilbert")+
+  lims(x=bbox["x",],y=bbox["y",])+
+  geom_point(
+    data=dd,
+    aes(x=long,y=lat,color=diff,alpha=0.5),
+    size=1
+  )+
+  guides(alpha="none")+
+  scale_color_gradient2(mid="gray90")+
+  labs(x="",y="",color="")+
+  theme(axis.text=element_blank()) -> cd_g_lisa
 ```
 
-```{r fig3,include=FALSE,purl=FALSE,fig.height=10,fig.width=10}
+```{r fig3,include=FALSE,purl=FALSE,fig.height=10,fig.width=10,cache=TRUE}
 library(cowplot)
 plot_grid(sv_g_lisa,cd_g_lisa,sv_g_exp,sv_g_imp,
           labels=c("A","B","C","D"),
