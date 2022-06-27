@@ -23,7 +23,7 @@ options(
   encoding="UTF-8",
   aakmisc.dbname="ewmeasles",
   aakmisc.remotehost="kinglab.eeb.lsa.umich.edu",
-  aakmisc.user="gravity"
+  aakmisc.user="kingaa"
 )
 theme_set(theme_bw())
 set.seed(594709947L)
@@ -36,6 +36,8 @@ stew(file="clean_data.rda",{
   startTunnel()
   
   getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
+  
+  getQuery("select * from coords") %>% arrange(town) -> coords
   
   getQuery("select town,date,cases from measles where year>=1944 order by town,date") %>%
     mutate(year=as.integer(format(date+3,"%Y"))) %>%
@@ -52,16 +54,6 @@ stew(file="clean_data.rda",{
 })
 
 
-
-
-## ----coords,purl=TRUE---------------------------------------------------------
-bake(file="coords.rds",{
-  library(aakmisc)
-  startTunnel()
-  getQuery("select * from coords") %>% arrange(town) -> coords
-  stopTunnel()
-  coords
-}) -> coords
 
 
 ## ----distances,purl=TRUE------------------------------------------------------

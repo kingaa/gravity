@@ -89,7 +89,7 @@ options(
   encoding="UTF-8",
   aakmisc.dbname="ewmeasles",
   aakmisc.remotehost="kinglab.eeb.lsa.umich.edu",
-  aakmisc.user="gravity"
+  aakmisc.user="kingaa"
 )
 theme_set(theme_bw())
 set.seed(594709947L)
@@ -108,6 +108,8 @@ stew(file="clean_data.rda",{
   startTunnel()
   
   getQuery("select town,year,births,pop from demog where year>=1944 order by town,year") -> demog
+  
+  getQuery("select * from coords") %>% arrange(town) -> coords
   
   getQuery("select town,date,cases from measles where year>=1944 order by town,date") %>%
     mutate(year=as.integer(format(date+3,"%Y"))) %>%
@@ -190,16 +192,6 @@ plot(fit,which=1:5,ask=FALSE)
 ## Coordinates and distances
 
 Now let's compute the distances between the cities.
-
-```{r coords,purl=TRUE}
-bake(file="coords.rds",{
-  library(aakmisc)
-  startTunnel()
-  getQuery("select * from coords") %>% arrange(town) -> coords
-  stopTunnel()
-  coords
-}) -> coords
-```
 
 ```{r distances,purl=TRUE}
 bake(file="distances.rds",{
